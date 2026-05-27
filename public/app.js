@@ -1,6 +1,13 @@
 // ═══════════════════════════════════════════════════════════════
 // SUIVI-DÉCHETS — Frontend App (Vanilla JS SPA)
 // ═══════════════════════════════════════════════════════════════
+// Détection auto environnement (localhost ou Render)
+const API_URL = window.location.hostname === 'localhost' 
+  ? 'http://localhost:3000' 
+  : 'https://suivi-dechets.onrender.com';
+
+// Exemple pour WebSocket
+const socket = io(API_URL);
 const API_URL = 'https://suivi-dechets.onrender.com';
 const bootToken = localStorage.getItem('accessToken');
 if (!bootToken && window.location.pathname !== '/login') {
