@@ -6,7 +6,11 @@
   "scripts": {
     "start": "node server.js",
     "dev": "node --watch server.js",
-    "init-db": "node db/init.js"
+    "init-db": "node db/init.js",
+    "generate-bins": "node scripts/generate-bins.js",
+    "simulate-esp32": "node scripts/simulate-esp32.js",
+    "generate-mass-alerts": "node scripts/generate-mass-alerts.js",
+    "validate-demo": "bash scripts/validate-demo.sh"
   },
   "dependencies": {
     "express": "^4.21.0",
@@ -18,7 +22,7 @@
     "uuid": "^10.0.0",
     "dotenv": "^16.0.0",
     "html2canvas": "^1.4.1",
-    "jspdf": "^4.2.1"
+    "jspdf": "^2.5.1"
   },
   "keywords": ["iot", "smart-city", "waste-management"],
   "author": "FAST UAC",
