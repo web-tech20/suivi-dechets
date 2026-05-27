@@ -13,18 +13,22 @@
     "validate-demo": "bash scripts/validate-demo.sh"
   },
   "dependencies": {
-    "express": "^4.21.0",
-    "better-sqlite3": "^11.7.0",
-    "socket.io": "^4.8.0",
-    "cors": "^2.8.5",
-    "jsonwebtoken": "^9.0.0",
     "bcryptjs": "^2.4.3",
-    "uuid": "^10.0.0",
+    "better-sqlite3": "^11.7.0",
+    "cors": "^2.8.5",
     "dotenv": "^16.0.0",
+    "express": "^4.21.0",
     "html2canvas": "^1.4.1",
-    "jspdf": "^2.5.1"
+    "jsonwebtoken": "^9.0.0",
+    "jspdf": "^2.5.2",
+    "socket.io": "^4.8.0",
+    "uuid": "^10.0.0"
   },
-  "keywords": ["iot", "smart-city", "waste-management"],
+  "keywords": [
+    "iot",
+    "smart-city",
+    "waste-management"
+  ],
   "author": "FAST UAC",
   "license": "MIT"
 }
