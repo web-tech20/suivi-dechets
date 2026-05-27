@@ -1,38 +1,26 @@
-"scripts": {
-  "start": "node server.js"
-}
 {
   "name": "suivi-dechets",
   "version": "1.0.0",
-  "description": "Application de gestion intelligente des poubelles connectées — Smart City Abomey-Calavi",
+  "description": "Smart Waste Management Platform - IoT connected bins with real-time monitoring",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
     "dev": "node --watch server.js",
-    "init-db": "node db/init.js",
-    "generate-bins": "node scripts/generate-bins.js",
-    "simulate-esp32": "node scripts/simulate-esp32.js",
-    "generate-mass-alerts": "node scripts/generate-mass-alerts.js",
-    "validate-demo": "bash scripts/validate-demo.sh"
+    "init-db": "node db/init.js"
   },
-  "keywords": [
-    "smart-city",
-    "waste-management",
-    "iot",
-    "real-time"
-  ],
-  "author": "SMART_DROP Team",
-  "license": "MIT",
   "dependencies": {
-    "bcryptjs": "^3.0.3",
-    "better-sqlite3": "^11.7.0",
-    "cors": "^2.8.5",
-    "dotenv": "^17.4.2",
     "express": "^4.21.0",
-    "html2canvas": "^1.4.1",
-    "jsonwebtoken": "^9.0.3",
-    "jspdf": "^4.2.1",
+    "better-sqlite3": "^11.7.0",
     "socket.io": "^4.8.0",
-    "uuid": "^10.0.0"
-  }
+    "cors": "^2.8.5",
+    "jsonwebtoken": "^9.0.0",
+    "bcryptjs": "^2.4.3",
+    "uuid": "^10.0.0",
+    "dotenv": "^16.0.0",
+    "html2canvas": "^1.4.1",
+    "jspdf": "^4.2.1"
+  },
+  "keywords": ["iot", "smart-city", "waste-management"],
+  "author": "FAST UAC",
+  "license": "MIT"
 }
