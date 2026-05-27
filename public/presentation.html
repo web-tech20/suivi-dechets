@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SUIVI-DÉCHETS | Présentation FAST UAC</title>
+  <style>
+    :root { color-scheme: dark; }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: Inter, system-ui, -apple-system, sans-serif;
+      background: linear-gradient(135deg, #0a0e27, #0f1533);
+      color: #f8fafc;
+    }
+    .hero {
+      text-align: center;
+      padding: 64px 20px;
+      background: linear-gradient(135deg, #1e3a8a, #5b21b6);
+    }
+    .hero h1 { font-size: clamp(30px, 6vw, 56px); margin: 0; }
+    .hero .accent { color: #fbbf24; }
+    .hero p { margin: 16px 0 26px; font-size: 18px; color: #dbeafe; }
+    .btn-demo {
+      display: inline-block;
+      padding: 15px 30px;
+      border-radius: 40px;
+      text-decoration: none;
+      font-weight: 800;
+      color: #fff;
+      background: linear-gradient(135deg, #10b981, #059669);
+      box-shadow: 0 10px 28px rgba(16, 185, 129, 0.35);
+    }
+    .features {
+      max-width: 1120px;
+      margin: 28px auto;
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 18px;
+      padding: 0 20px;
+    }
+    .feature-card {
+      background: rgba(255, 255, 255, 0.08);
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      border-radius: 18px;
+      padding: 24px 18px;
+      text-align: center;
+      font-weight: 600;
+      backdrop-filter: blur(6px);
+    }
+    .tech-stack {
+      max-width: 1120px;
+      margin: 24px auto 40px;
+      background: #11162e;
+      border: 1px solid rgba(148, 163, 184, 0.2);
+      padding: 32px;
+      border-radius: 20px;
+    }
+    .tech-stack h3 { margin-top: 0; color: #c4b5fd; }
+    .tech-stack p { margin: 10px 0; color: #cbd5e1; }
+    @media (max-width: 900px) {
+      .features { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <section class="hero">
+    <h1>SUIVI-DÉCHETS <span class="accent">FAST UAC</span></h1>
+    <p>Gestion intelligente des déchets urbains par IoT et intelligence artificielle</p>
+    <a href="/login" class="btn-demo">🎓 Lancer la démonstration</a>
+  </section>
+
+  <section class="features">
+    <div class="feature-card">🗑️ 500+ poubelles connectées</div>
+    <div class="feature-card">📡 ESP32 — données temps réel</div>
+    <div class="feature-card">🗺️ Carte interactive + clustering</div>
+    <div class="feature-card">🚛 Optimisation tournées TSP</div>
+    <div class="feature-card">📊 Dashboard analytique</div>
+    <div class="feature-card">🔐 Authentification JWT</div>
+  </section>
+
+  <section class="tech-stack">
+    <h3>Stack technique</h3>
+    <p>Node.js | Express | SQLite | WebSocket | Leaflet | JWT | ESP32 | Arduino</p>
+    <p style="margin-top: 18px; font-size: 14px;">Développé à la Faculté des Sciences et Techniques — Université d'Abomey-Calavi</p>
+    <p>🏆 Hackathon 2026</p>
+    <p style="margin-top: 20px; opacity: 0.9;">
+      Accès direct app: <a href="/login" style="color:#93c5fd;">/login</a> —
+      mode jury: <a href="/?demo=1" style="color:#93c5fd;">/?demo=1</a>
+    </p>
+  </section>
+</body>
+</html>

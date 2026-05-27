@@ -1,0 +1,257 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SUIVI-DÉCHETS V2.0 | Plateforme Enterprise</title>
+  
+  <!-- Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+  
+  <!-- Styles -->
+  <link rel="stylesheet" href="css/styles.css">
+  <link rel="stylesheet" href="css/dark-theme.css">
+  
+  <!-- Icons -->
+  <script src="https://unpkg.com/lucide@latest"></script>
+  
+  <!-- Chart.js -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  
+  <!-- Socket.io -->
+  <script src="/socket.io/socket.io.js"></script>
+
+  <!-- Google Maps API with Clustering (Added dynamically in google-maps.js) -->
+</head>
+<body class="dark-theme">
+  
+  <!-- Authentication Overlay -->
+  <div id="auth-overlay" class="auth-overlay">
+    <div class="auth-card glass-panel">
+      <div class="auth-header">
+        <i data-lucide="trash-2" class="auth-icon"></i>
+        <h2>SUIVI-DÉCHETS V2.0</h2>
+        <p>Connexion sécurisée à la plateforme</p>
+      </div>
+      <form id="login-form">
+        <div class="form-group">
+          <label for="email">Adresse Email</label>
+          <input type="email" id="email" required placeholder="admin@suivi-dechets.com">
+        </div>
+        <div class="form-group">
+          <label for="password">Mot de Passe</label>
+          <input type="password" id="password" required placeholder="••••••••">
+        </div>
+        <button type="submit" class="btn btn-primary btn-block">Se connecter</button>
+      </form>
+      <div id="auth-error" class="auth-error"></div>
+    </div>
+  </div>
+
+  <!-- Main Application -->
+  <div id="app" class="app-container" style="display: none;">
+    <!-- Sidebar -->
+    <aside class="sidebar glass-panel">
+      <div class="sidebar-header">
+        <div class="logo-container">
+          <i data-lucide="trash-2" class="logo-icon"></i>
+          <span class="logo-text">SUIVI-DÉCHETS</span>
+        </div>
+        <button id="toggle-sidebar" class="btn-icon"><i data-lucide="menu"></i></button>
+      </div>
+      
+      <nav class="sidebar-nav">
+        <a href="#dashboard" class="nav-item active" data-tab="dashboard">
+          <i data-lucide="trending-up"></i><span>Dashboard</span>
+        </a>
+        <a href="#carte" class="nav-item" data-tab="carte">
+          <i data-lucide="map-pin"></i><span>Carte & ML</span>
+        </a>
+        <a href="#tournees" class="nav-item" data-tab="tournees">
+          <i data-lucide="route"></i><span>Tournées</span>
+        </a>
+        <a href="#alertes" class="nav-item" data-tab="alertes">
+          <i data-lucide="bell"></i><span>Alertes <span id="alerts-badge" class="badge">0</span></span>
+        </a>
+      </nav>
+      
+      <div class="sidebar-footer">
+        <div class="user-info">
+          <div class="avatar"><i data-lucide="user"></i></div>
+          <div class="user-details">
+            <span id="user-name" class="name">Chargement...</span>
+            <span id="user-role" class="role">Admin</span>
+          </div>
+        </div>
+        <button id="btn-logout" class="btn-icon" title="Déconnexion"><i data-lucide="log-out"></i></button>
+      </div>
+    </aside>
+
+    <!-- Main Content -->
+    <main class="main-content">
+      <!-- Topbar -->
+      <header class="topbar glass-panel">
+        <h1 id="page-title">Dashboard Analytique</h1>
+        <div class="topbar-actions">
+          <div class="search-box">
+            <i data-lucide="search"></i>
+            <input type="text" id="global-search" placeholder="Rechercher une poubelle...">
+          </div>
+          <button id="theme-toggle" class="btn-icon"><i data-lucide="moon"></i></button>
+          <div id="connection-status" class="status-indicator online" title="Connecté au serveur"></div>
+        </div>
+      </header>
+
+      <!-- Views -->
+      <div class="views-container">
+        
+        <!-- Dashboard View -->
+        <div id="view-dashboard" class="view active">
+          <div class="kpi-grid">
+            <div class="kpi-card glass-panel">
+              <div class="kpi-icon green"><i data-lucide="battery"></i></div>
+              <div class="kpi-data">
+                <h3>Remplissage Moyen</h3>
+                <div class="val" id="kpi-avg-fill">--%</div>
+              </div>
+            </div>
+            <div class="kpi-card glass-panel">
+              <div class="kpi-icon red"><i data-lucide="alert-triangle"></i></div>
+              <div class="kpi-data">
+                <h3>Alertes Actives</h3>
+                <div class="val" id="kpi-active-alerts">0</div>
+              </div>
+            </div>
+            <div class="kpi-card glass-panel">
+              <div class="kpi-icon blue"><i data-lucide="route"></i></div>
+              <div class="kpi-data">
+                <h3>Distance Économisée</h3>
+                <div class="val" id="kpi-distance">-- km</div>
+              </div>
+            </div>
+            <div class="kpi-card glass-panel">
+              <div class="kpi-icon green"><i data-lucide="wind"></i></div>
+              <div class="kpi-data">
+                <h3>CO₂ Économisé</h3>
+                <div class="val" id="kpi-co2">-- kg</div>
+              </div>
+            </div>
+          </div>
+          
+          <div class="charts-grid">
+            <div class="chart-card glass-panel">
+              <div class="card-header">
+                <h3>Production de Déchets (7 derniers jours)</h3>
+              </div>
+              <div class="chart-container">
+                <canvas id="productionChart"></canvas>
+              </div>
+            </div>
+            <div class="chart-card glass-panel">
+              <div class="card-header">
+                <h3>Prédiction ML LSTM (72h)</h3>
+                <span class="badge ml-badge">TensorFlow</span>
+              </div>
+              <div class="chart-container">
+                <canvas id="predictionChart"></canvas>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Carte View -->
+        <div id="view-carte" class="view">
+          <div class="map-wrapper glass-panel">
+            <div id="google-map" class="map-container"></div>
+            
+            <div id="map-overlay-panel" class="map-overlay glass-panel">
+              <div class="overlay-header">
+                <h3 id="overlay-bin-name">Sélectionnez une poubelle</h3>
+                <button id="close-overlay" class="btn-icon"><i data-lucide="x"></i></button>
+              </div>
+              <div class="overlay-content" id="overlay-content">
+                <p class="text-muted">Cliquez sur un marqueur sur la carte Google Maps pour afficher les détails, les prédictions IA et l'intégration Street View.</p>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Tournées View -->
+        <div id="view-tournees" class="view">
+          <div class="tournees-layout">
+            <div class="tournees-list glass-panel">
+              <div class="card-header">
+                <h3>Poubelles à Collecter</h3>
+                <button id="btn-select-all" class="btn btn-small btn-secondary">Tout sélectionner</button>
+              </div>
+              <div class="bins-list" id="tournees-bins-list">
+                <div class="loading-spinner"></div>
+              </div>
+              <div class="card-footer">
+                <button id="btn-optimize" class="btn btn-primary btn-block">
+                  <i data-lucide="zap"></i> Générer l'itinéraire optimal
+                </button>
+              </div>
+            </div>
+            
+            <div class="tournees-result glass-panel">
+              <div id="tournee-empty-state" class="empty-state">
+                <i data-lucide="map" class="empty-icon"></i>
+                <h3>Aucune tournée générée</h3>
+                <p>Sélectionnez des poubelles et lancez l'optimisation TSP 2-Opt avec trafic Google Maps.</p>
+              </div>
+              <div id="tournee-results-state" class="results-state" style="display:none;">
+                <div class="card-header">
+                  <h3>Détails de la Tournée Optimisée</h3>
+                  <button id="btn-export-pdf" class="btn btn-primary btn-small">
+                    <i data-lucide="download"></i> Exporter PDF
+                  </button>
+                </div>
+                <div class="tournee-stats">
+                  <div class="stat-box"><span class="label">Distance</span><span class="val" id="tournee-dist"></span></div>
+                  <div class="stat-box"><span class="label">Durée</span><span class="val" id="tournee-time"></span></div>
+                  <div class="stat-box"><span class="label">Carburant</span><span class="val" id="tournee-fuel"></span></div>
+                  <div class="stat-box"><span class="label">CO₂</span><span class="val" id="tournee-co2"></span></div>
+                </div>
+                <div class="route-list" id="optimized-route-list"></div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Alertes View -->
+        <div id="view-alertes" class="view">
+          <div class="alerts-container glass-panel">
+            <div class="card-header">
+              <h3>Alertes Actives</h3>
+              <button id="btn-refresh-alerts" class="btn-icon"><i data-lucide="refresh-cw"></i></button>
+            </div>
+            <div class="alerts-list" id="alerts-list">
+              <div class="loading-spinner"></div>
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </main>
+  </div>
+
+  <!-- Toast Container -->
+  <div id="toast-container" class="toast-container"></div>
+
+  <!-- Scripts Modules -->
+  <script type="module" src="js/auth.js"></script>
+  <script type="module" src="js/websocket.js"></script>
+  <script type="module" src="js/google-maps.js"></script>
+  <script type="module" src="js/dashboard.js"></script>
+  <script type="module" src="js/tournees.js"></script>
+  <script type="module" src="js/alerts.js"></script>
+  <script type="module" src="js/ml-viz.js"></script>
+  <script type="module" src="js/app.js"></script>
+
+  <!-- Lucide Icons Init -->
+  <script>lucide.createIcons();</script>
+</body>
+</html>

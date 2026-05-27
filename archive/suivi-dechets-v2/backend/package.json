@@ -1,0 +1,30 @@
+{
+  "name": "suivi-dechets-backend-v2",
+  "version": "2.0.0",
+  "description": "Enterprise API Gateway for Smart Waste Management Platform Suivi-Déchets V2.0",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js",
+    "migrate": "node database/migrate.js",
+    "seed": "node database/seed.js"
+  },
+  "dependencies": {
+    "bcryptjs": "^2.4.3",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.5",
+    "express": "^4.21.0",
+    "express-rate-limit": "^7.4.0",
+    "jsonwebtoken": "^9.0.2",
+    "nodemailer": "^6.9.15",
+    "passport": "^0.7.0",
+    "passport-jwt": "^4.0.1",
+    "passport-local": "^1.0.0",
+    "pg": "^8.13.0",
+    "puppeteer": "^23.4.0",
+    "redis": "^4.7.0",
+    "socket.io": "^4.8.0",
+    "twilio": "^5.3.0",
+    "uuid": "^10.0.0"
+  }
+}

@@ -1,0 +1,31 @@
+/* Dark Theme Overrides */
+.dark-theme {
+  --bg: #0f172a;
+  --surface: #1e293b;
+  --surface-hover: #334155;
+  --text: #f8fafc;
+  --text-muted: #94a3b8;
+  --border: #334155;
+  --glass-bg: rgba(30, 41, 59, 0.7);
+  --glass-border: rgba(255, 255, 255, 0.1);
+  --shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.3), 0 2px 4px -1px rgba(0, 0, 0, 0.2);
+}
+
+.dark-theme .kpi-card, 
+.dark-theme .chart-card,
+.dark-theme .tournees-list,
+.dark-theme .tournees-result,
+.dark-theme .alerts-container {
+  background: var(--surface);
+  border-color: var(--border);
+}
+
+.dark-theme .form-group input {
+  background: #0f172a;
+  color: #fff;
+}
+
+/* Ensure Chart.js fonts are visible */
+.dark-theme canvas {
+  filter: drop-shadow(0 0 10px rgba(0,0,0,0.2));
+}

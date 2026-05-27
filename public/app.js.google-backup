@@ -1,0 +1,1947 @@
+// ═══════════════════════════════════════════════════════════════
+// SUIVI-DÉCHETS — Frontend App (Vanilla JS SPA)
+// ═══════════════════════════════════════════════════════════════
+
+const bootToken = localStorage.getItem('accessToken');
+if (!bootToken && window.location.pathname !== '/login') {
+  window.location.href = '/login';
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+  const BENIN_CENTER = { lat: 6.4486, lng: 2.3553 };
+  const LAND_BOUNDS = { latMin: 6.435, latMax: 6.465, lngMin: 2.335, lngMax: 2.375 };
+  const DEFAULT_BOUNDS = {
+    north: 6.47,
+    south: 6.43,
+    west: 2.33,
+    east: 2.38
+  };
+
+  function clampToLand(lat, lng) {
+    return {
+      lat: Math.max(LAND_BOUNDS.latMin, Math.min(LAND_BOUNDS.latMax, lat)),
+      lng: Math.max(LAND_BOUNDS.lngMin, Math.min(LAND_BOUNDS.lngMax, lng))
+    };
+  }
+
+  const state = {
+    activeTab: 'dashboard',
+    poubelles: [],
+    alertes: [],
+    stats: null,
+    selectedBins: [],
+    currentRoute: null,
+    currentUser: null,
+    simulationActive: false,
+    currentMapMode: null,
+    mapConfig: null,
+    map: null,
+    markers: {},
+    markerCluster: null,
+    trafficLayer: null,
+    directionsService: null,
+    directionsRenderer: null,
+    fallbackPolyline: null,
+    activeInfoWindow: null,
+    quartiersChart: null
+  };
+
+  let deferredPrompt = null;
+  let googleMapsPromise = null;
+
+  function getAccessToken() {
+    return localStorage.getItem('accessToken');
+  }
+
+  function getRefreshToken() {
+    return localStorage.getItem('refreshToken');
+  }
+
+  function setSession(tokens = {}, user = null) {
+    if (tokens.accessToken) localStorage.setItem('accessToken', tokens.accessToken);
+    if (tokens.refreshToken) localStorage.setItem('refreshToken', tokens.refreshToken);
+    if (user) {
+      localStorage.setItem('user', JSON.stringify(user));
+      state.currentUser = user;
+    }
+  }
+
+  function clearSession() {
+    localStorage.removeItem('accessToken');
+    localStorage.removeItem('refreshToken');
+    localStorage.removeItem('user');
+    state.currentUser = null;
+  }
+
+  async function refreshAccessToken() {
+    const refreshToken = getRefreshToken();
+    if (!refreshToken) return false;
+
+    const response = await fetch('/api/auth/refresh', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ refreshToken })
+    });
+
+    if (!response.ok) {
+      clearSession();
+      return false;
+    }
+
+    const tokens = await response.json();
+    setSession(tokens);
+    return true;
+  }
+
+  async function apiFetch(url, options = {}, retry = true) {
+    const headers = { ...(options.headers || {}) };
+    const token = getAccessToken();
+
+    if (token && options.auth !== false) {
+      headers.Authorization = `Bearer ${token}`;
+    }
+
+    const response = await fetch(url, { ...options, headers });
+
+    if (response.status === 401 && retry) {
+      let payload = null;
+      try {
+        payload = await response.clone().json();
+      } catch (error) {
+        payload = null;
+      }
+
+      if (payload && payload.code === 'TOKEN_EXPIRED') {
+        const refreshed = await refreshAccessToken();
+        if (refreshed) {
+          return apiFetch(url, options, false);
+        }
+      }
+
+      clearSession();
+      if (window.location.pathname !== '/login') {
+        window.location.href = '/login';
+      }
+    }
+
+    return response;
+  }
+
+  const API = {
+    async getStats() {
+      const res = await apiFetch('/api/stats');
+      return res.json();
+    },
+    async getPoubelles() {
+      const res = await apiFetch('/api/poubelles');
+      return res.json();
+    },
+    async getAlertes() {
+      const res = await apiFetch('/api/alertes');
+      return res.json();
+    },
+    async acknowledgeAlert(id) {
+      const res = await apiFetch(`/api/alertes/${id}/acknowledge`, { method: 'PUT' });
+      return res.json();
+    },
+    async optimizeRoute(binIds) {
+      const res = await apiFetch('/api/tournees/optimiser', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ poubelle_ids: binIds, collecteur: 'Equipe Elite' })
+      });
+      return res.json();
+    },
+    async assignRoute(routeId, collecteur = 'Equipe Elite') {
+      const res = await apiFetch(`/api/tournees/${routeId}/assigner`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ collecteur })
+      });
+      return res.json();
+    },
+    async toggleSimulation(start, interval = 5000) {
+      const endpoint = start ? '/api/simulation/start' : '/api/simulation/stop';
+      const res = await apiFetch(endpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ interval })
+      });
+      return res.json();
+    },
+    async getSimulationStatus() {
+      const res = await apiFetch('/api/simulation/status');
+      return res.json();
+    },
+    async getMe() {
+      const res = await apiFetch('/api/auth/me');
+      return res.json();
+    },
+    async logout() {
+      const res = await apiFetch('/api/auth/logout', { method: 'POST' });
+      return res.json();
+    },
+    async getMapsConfig() {
+      const res = await apiFetch('/api/config/maps');
+      return res.json();
+    }
+  };
+
+  function showToast(message, type = 'success') {
+    const container = document.getElementById('toast-container');
+    const toast = document.createElement('div');
+    toast.className = `toast toast--${type}`;
+
+    let icon = '';
+    if (type === 'success') icon = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#10b981" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>';
+    else if (type === 'error') icon = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#ef4444" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>';
+    else icon = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#f59e0b" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>';
+
+    toast.innerHTML = `
+      ${icon}
+      <span>${message}</span>
+      <button class="toast__close">&times;</button>
+    `;
+
+    container.appendChild(toast);
+
+    toast.querySelector('.toast__close').addEventListener('click', () => {
+      toast.remove();
+    });
+
+    setTimeout(() => {
+      toast.style.opacity = '0';
+      setTimeout(() => toast.remove(), 400);
+    }, 4500);
+
+    if (type === 'error' && 'Notification' in window && Notification.permission === 'granted') {
+      new Notification('SUIVI-DÉCHETS', {
+        body: message,
+        icon: '/favicon.svg',
+        badge: '/favicon.svg',
+        vibrate: [200, 100, 200]
+      });
+    }
+  }
+
+  async function initPushNotifications() {
+    if (!('Notification' in window) || !('serviceWorker' in navigator)) {
+      return;
+    }
+
+    const permission = await Notification.requestPermission();
+    if (permission === 'granted') {
+      await navigator.serviceWorker.ready;
+      console.log('✅ Notifications push autorisées');
+    }
+  }
+
+  function registerServiceWorker() {
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.register('/service-worker.js')
+        .then((registration) => console.log('✅ Service Worker enregistré', registration.scope))
+        .catch((error) => console.error('❌ Service Worker échec', error));
+    }
+  }
+
+  function setupPwaInstallPrompt() {
+    window.addEventListener('beforeinstallprompt', (event) => {
+      event.preventDefault();
+      deferredPrompt = event;
+
+      if (document.getElementById('install-pwa-btn')) {
+        return;
+      }
+
+      const installBtn = document.createElement('button');
+      installBtn.id = 'install-pwa-btn';
+      installBtn.textContent = 'Installer l application';
+      installBtn.className = 'btn btn--primary btn--sm';
+      installBtn.addEventListener('click', async () => {
+        if (!deferredPrompt) return;
+        deferredPrompt.prompt();
+        await deferredPrompt.userChoice;
+        deferredPrompt = null;
+        installBtn.remove();
+      });
+
+      document.querySelector('.header__right')?.prepend(installBtn);
+    });
+  }
+
+  function formatTimestamp(value) {
+    if (!value) return '--';
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return value;
+    return date.toLocaleString('fr-FR');
+  }
+
+  function getMarkerColor(level) {
+    if (level >= 80) return '#ef4444';
+    if (level >= 50) return '#f59e0b';
+    return '#10b981';
+  }
+
+  function isUACBin(bin) {
+    return Boolean(bin?.quartier && String(bin.quartier).startsWith('UAC'));
+  }
+
+  function createMarkerIcon(level, bin = null) {
+    const color = getMarkerColor(level);
+
+    if (bin && isUACBin(bin) && window.google?.maps?.SymbolPath) {
+      return {
+        path: 'M12 2L15 8.5L22 9.5L17 14L18.5 21L12 17.5L5.5 21L7 14L2 9.5L9 8.5L12 2Z',
+        fillColor: color,
+        fillOpacity: 1,
+        strokeColor: '#ffffff',
+        strokeWeight: 2,
+        scale: 1.8,
+        anchor: new google.maps.Point(12, 12)
+      };
+    }
+
+    const svg = `
+      <svg xmlns="http://www.w3.org/2000/svg" width="54" height="64" viewBox="0 0 54 64">
+        <defs>
+          <filter id="shadow" x="-20%" y="-20%" width="160%" height="180%">
+            <feDropShadow dx="0" dy="8" stdDeviation="4" flood-color="rgba(15,23,42,0.32)"/>
+          </filter>
+          <linearGradient id="pin" x1="0%" y1="0%" x2="0%" y2="100%">
+            <stop offset="0%" stop-color="${color}"/>
+            <stop offset="100%" stop-color="${color}"/>
+          </linearGradient>
+        </defs>
+        <ellipse cx="27" cy="57" rx="12" ry="5" fill="rgba(15,23,42,0.16)"/>
+        <g filter="url(#shadow)">
+          <path d="M27 4c-10.493 0-19 8.507-19 19 0 14.25 19 34 19 34s19-19.75 19-34c0-10.493-8.507-19-19-19z" fill="url(#pin)"/>
+          <circle cx="27" cy="23" r="9" fill="#ffffff"/>
+          <circle cx="27" cy="23" r="4" fill="${color}" fill-opacity="0.25"/>
+        </g>
+      </svg>
+    `;
+
+    return {
+      url: `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(svg)}`,
+      scaledSize: new google.maps.Size(40, 48),
+      anchor: new google.maps.Point(20, 44)
+    };
+  }
+
+  function buildInfoWindowContent(bin) {
+    const level = Math.round(Number(bin.niveau || 0));
+    const color = getMarkerColor(level);
+    return `
+      <div class="bin-popup">
+        <div class="bin-popup__name" style="color:${color};">${bin.nom}</div>
+        <div class="bin-popup__quartier">${bin.quartier} - ${bin.adresse || ''}</div>
+        <div class="bin-popup__level">
+          <div class="progress" style="margin-bottom: 0;">
+            <div class="progress__header">
+              <span class="progress__label">Remplissage</span>
+              <span class="progress__value">${level}%</span>
+            </div>
+            <div class="progress__bar" style="height: 6px;">
+              <div class="progress__fill" style="width:${Math.min(level, 100)}%; background:${color};"></div>
+            </div>
+          </div>
+        </div>
+        <div class="bin-popup__stats">
+          <div class="bin-popup__stat"><span>Temp:</span><span>${bin.temperature ?? '--'}°C</span></div>
+          <div class="bin-popup__stat"><span>Batt:</span><span>${bin.batterie ?? '--'}%</span></div>
+          <div class="bin-popup__stat"><span>Signal:</span><span>${bin.signal_force ?? '--'}%</span></div>
+          <div class="bin-popup__stat"><span>Maj:</span><span>${formatTimestamp(bin.dernier_releve)}</span></div>
+        </div>
+        <div class="bin-popup__cta">Cliquez pour ouvrir Street View</div>
+      </div>
+    `;
+  }
+
+  async function loadGoogleMaps() {
+    if (window.google?.maps) {
+      return window.google.maps;
+    }
+
+    if (googleMapsPromise) {
+      return googleMapsPromise;
+    }
+
+    googleMapsPromise = new Promise(async (resolve, reject) => {
+      try {
+        const config = await API.getMapsConfig();
+        if (config.error || !config.apiKey) {
+          reject(new Error(config.error || 'Configuration Google Maps indisponible'));
+          return;
+        }
+
+        state.mapConfig = config;
+        const timeoutMs = 12000;
+        const timeoutId = setTimeout(() => {
+          try {
+            delete window.__suiviMapsReady;
+          } catch (e) {
+            // no-op
+          }
+          reject(new Error('Google Maps chargement timeout'));
+        }, timeoutMs);
+
+        window.__suiviMapsReady = () => {
+          clearTimeout(timeoutId);
+          try {
+            delete window.__suiviMapsReady;
+          } catch (e) {
+            // no-op
+          }
+          if (window.google?.maps) {
+            resolve(window.google.maps);
+          } else {
+            reject(new Error('Google Maps chargée mais google.maps est indisponible'));
+          }
+        };
+
+        const script = document.createElement('script');
+        script.src = `https://maps.googleapis.com/maps/api/js?key=${encodeURIComponent(config.apiKey)}&libraries=geometry,places&v=weekly&callback=__suiviMapsReady`;
+        script.async = true;
+        script.defer = true;
+        script.onerror = () => {
+          clearTimeout(timeoutId);
+          reject(new Error('Impossible de charger Google Maps'));
+        };
+        document.head.appendChild(script);
+      } catch (error) {
+        reject(error);
+      }
+    });
+
+    return googleMapsPromise;
+  }
+
+  function clearMapState() {
+    if (state.markerCluster?.clearMarkers) {
+      state.markerCluster.clearMarkers();
+    }
+    state.markerCluster = null;
+
+    Object.values(state.markers).forEach((entry) => {
+      if (entry?.marker) {
+        entry.marker.setMap(null);
+      }
+    });
+    state.markers = {};
+
+    if (state.directionsRenderer) {
+      state.directionsRenderer.setMap(null);
+      state.directionsRenderer = null;
+    }
+
+    if (state.fallbackPolyline) {
+      state.fallbackPolyline.setMap(null);
+      state.fallbackPolyline = null;
+    }
+
+    state.directionsService = null;
+    state.trafficLayer = null;
+    state.activeInfoWindow = null;
+    state.map = null;
+  }
+
+  async function initGoogleMap(containerId, options = {}) {
+    await loadGoogleMaps();
+
+    clearMapState();
+
+    const container = document.getElementById(containerId);
+    if (!container) {
+      return null;
+    }
+
+    const center = state.mapConfig?.center || BENIN_CENTER;
+    const bounds = state.mapConfig?.bounds || DEFAULT_BOUNDS;
+
+    const mapOptions = {
+      center,
+      zoom: options.zoom || 12,
+      disableDefaultUI: false,
+      zoomControl: true,
+      mapTypeControl: true,
+      fullscreenControl: true,
+      streetViewControl: true,
+      restriction: {
+        latLngBounds: bounds,
+        strictBounds: false
+      },
+      clickableIcons: false,
+      styles: [
+        {
+          featureType: 'poi',
+          elementType: 'labels',
+          stylers: [{ visibility: 'off' }]
+        }
+      ]
+    };
+
+    // Certains problèmes (mapId invalide / config Google) peuvent empêcher l'instanciation du map.
+    // On retente sans mapId si nécessaire.
+    try {
+      mapOptions.mapId = state.mapConfig?.mapId || 'SUIVI_DECHETS_MAP';
+      state.map = new google.maps.Map(container, mapOptions);
+    } catch (e) {
+      console.warn('Google Maps: instanciation échouée (mapId). Re-tentative sans mapId.', e);
+      delete mapOptions.mapId;
+      state.map = new google.maps.Map(container, mapOptions);
+    }
+
+    state.currentMapMode = options.mode || 'dashboard';
+    addTrafficLayer();
+
+    if (options.enableDirections) {
+      state.directionsService = new google.maps.DirectionsService();
+      state.directionsRenderer = new google.maps.DirectionsRenderer({
+        suppressMarkers: true,
+        preserveViewport: false,
+        polylineOptions: {
+          strokeColor: '#10b981',
+          strokeOpacity: 0.92,
+          strokeWeight: 6
+        }
+      });
+      state.directionsRenderer.setMap(state.map);
+    }
+
+    if (options.showAllBins !== false) {
+      addBinMarkers(state.poubelles, {
+        cluster: options.cluster !== false
+      });
+    }
+
+    return state.map;
+  }
+
+  function addTrafficLayer() {
+    if (!state.map || !window.google?.maps) return;
+    state.trafficLayer = new google.maps.TrafficLayer();
+    state.trafficLayer.setMap(state.map);
+  }
+
+  function addStreetView(marker) {
+    if (!state.map || !marker?.getPosition) return;
+    const streetView = state.map.getStreetView();
+    streetView.setPosition(marker.getPosition());
+    streetView.setPov({ heading: 0, pitch: 0 });
+    streetView.setVisible(true);
+  }
+
+  function addBinMarkers(bins = state.poubelles, options = {}) {
+    if (!state.map || !window.google?.maps) return;
+
+    const clusterEnabled = options.cluster !== false;
+    const bounds = new google.maps.LatLngBounds();
+    const markerInstances = [];
+
+    if (state.markerCluster?.clearMarkers) {
+      state.markerCluster.clearMarkers();
+    }
+    Object.values(state.markers).forEach((entry) => {
+      if (entry?.marker) entry.marker.setMap(null);
+    });
+    state.markers = {};
+
+    bins.forEach((bin) => {
+      const level = Number(bin.niveau || 0);
+      const position = { lat: Number(bin.latitude), lng: Number(bin.longitude) };
+      const marker = new google.maps.Marker({
+        position,
+        map: state.map,
+        title: bin.nom,
+        icon: createMarkerIcon(level, bin),
+        animation: level >= 80 ? google.maps.Animation.BOUNCE : null,
+        optimized: true
+      });
+
+      if (level >= 80) {
+        setTimeout(() => marker.setAnimation(null), 2400);
+      }
+
+      const infoWindow = new google.maps.InfoWindow({
+        content: buildInfoWindowContent(bin)
+      });
+
+      const record = { marker, infoWindow, bin };
+      marker.addListener('click', () => {
+        if (state.activeInfoWindow) {
+          state.activeInfoWindow.close();
+        }
+        infoWindow.setContent(buildInfoWindowContent(record.bin));
+        infoWindow.open({ anchor: marker, map: state.map });
+        state.activeInfoWindow = infoWindow;
+        addStreetView(marker);
+      });
+
+      state.markers[bin.id] = record;
+      markerInstances.push(marker);
+      bounds.extend(position);
+    });
+
+    if (clusterEnabled && window.markerClusterer?.MarkerClusterer && markerInstances.length > 1) {
+      state.markerCluster = new window.markerClusterer.MarkerClusterer({
+        map: state.map,
+        markers: markerInstances
+      });
+    }
+
+    if (!bounds.isEmpty() && bins.length > 1 && state.currentMapMode !== 'route') {
+      state.map.fitBounds(bounds, 60);
+    } else if (bins.length === 1) {
+      state.map.setCenter(bounds.getCenter());
+      state.map.setZoom(15);
+    }
+  }
+
+  function updateMarker(bin) {
+    const record = state.markers[bin.id];
+    if (!record || !state.map || !window.google?.maps) return;
+
+    const merged = { ...record.bin, ...bin };
+    const level = Number(merged.niveau || 0);
+    record.bin = merged;
+    record.marker.setPosition({
+      lat: Number(merged.latitude),
+      lng: Number(merged.longitude)
+    });
+    record.marker.setIcon(createMarkerIcon(level, merged));
+    record.marker.setAnimation(level >= 80 ? google.maps.Animation.BOUNCE : null);
+    if (level >= 80) {
+      setTimeout(() => record.marker.setAnimation(null), 2400);
+    }
+    if (state.activeInfoWindow === record.infoWindow) {
+      record.infoWindow.setContent(buildInfoWindowContent(merged));
+    }
+  }
+
+  async function calculateRoute(routeBins) {
+    if (!state.map || !state.directionsService || !state.directionsRenderer || !routeBins?.length) {
+      return null;
+    }
+
+    const routePoints = routeBins.map((bin) => ({
+      ...bin,
+      latitude: Number(bin.latitude),
+      longitude: Number(bin.longitude)
+    }));
+
+    if (routePoints.length < 2) {
+      return null;
+    }
+
+    const origin = {
+      lat: routePoints[0].latitude,
+      lng: routePoints[0].longitude
+    };
+    const destination = {
+      lat: routePoints[routePoints.length - 1].latitude,
+      lng: routePoints[routePoints.length - 1].longitude
+    };
+    const waypoints = routePoints.slice(1, -1).map((bin) => ({
+      location: {
+        lat: bin.latitude,
+        lng: bin.longitude
+      },
+      stopover: true
+    }));
+
+    try {
+      const result = await state.directionsService.route({
+        origin,
+        destination,
+        waypoints,
+        optimizeWaypoints: true,
+        travelMode: google.maps.TravelMode.DRIVING,
+        unitSystem: google.maps.UnitSystem.METRIC,
+        drivingOptions: {
+          departureTime: new Date(),
+          trafficModel: google.maps.TrafficModel.BEST_GUESS
+        }
+      });
+
+      if (state.fallbackPolyline) {
+        state.fallbackPolyline.setMap(null);
+        state.fallbackPolyline = null;
+      }
+
+      state.directionsRenderer.setDirections(result);
+
+      const order = [routePoints[0], ...result.routes[0].waypoint_order.map((index) => routePoints[index + 1]), routePoints[routePoints.length - 1]];
+      const totals = result.routes[0].legs.reduce((acc, leg) => {
+        acc.distanceMeters += leg.distance?.value || 0;
+        acc.durationSeconds += leg.duration?.value || 0;
+        return acc;
+      }, { distanceMeters: 0, durationSeconds: 0 });
+
+      addBinMarkers(order, { cluster: false });
+
+      return {
+        raw: result,
+        orderedStops: order,
+        distanceKm: Math.round((totals.distanceMeters / 1000) * 100) / 100,
+        durationMin: Math.round(totals.durationSeconds / 60)
+      };
+    } catch (error) {
+      console.warn("Directions API failed, using geodesic route fallback", error);
+      showToast("Directions API indisponible. Trajet à vol d'oiseau.", "warning");
+
+      if (state.fallbackPolyline) {
+        state.fallbackPolyline.setMap(null);
+      }
+
+      const pathCoordinates = routePoints.map(p => ({ lat: p.latitude, lng: p.longitude }));
+      pathCoordinates.push({ lat: routePoints[0].latitude, lng: routePoints[0].longitude });
+
+      state.fallbackPolyline = new google.maps.Polyline({
+        path: pathCoordinates,
+        geodesic: true,
+        strokeColor: '#f59e0b',
+        strokeOpacity: 0.8,
+        strokeWeight: 4,
+        map: state.map
+      });
+
+      addBinMarkers(routePoints, { cluster: false });
+
+      const bounds = new google.maps.LatLngBounds();
+      pathCoordinates.forEach(coord => bounds.extend(coord));
+      state.map.fitBounds(bounds, 60);
+
+      return {
+        isFallback: true,
+        orderedStops: routePoints,
+        distanceKm: null,
+        durationMin: null
+      };
+    }
+  }
+
+  async function exportRoutePdf(routeData = state.currentRoute, options = {}) {
+    if (!routeData) {
+      showToast('Aucune tournée à exporter', 'error');
+      return;
+    }
+
+    if (!window.jspdf?.jsPDF || !window.html2canvas) {
+      showToast('Librairies PDF indisponibles', 'error');
+      return;
+    }
+
+    const target = document.getElementById('route-result-container');
+    if (!target) {
+      showToast('Résumé de tournée introuvable', 'error');
+      return;
+    }
+
+    const exportBtn = document.getElementById('btn-export-pdf');
+    const previousText = exportBtn ? exportBtn.textContent : '';
+
+    if (exportBtn) {
+      exportBtn.disabled = true;
+      exportBtn.textContent = 'Generation PDF...';
+    }
+
+    try {
+      const canvas = await window.html2canvas(target, {
+        backgroundColor: '#ffffff',
+        scale: 2,
+        useCORS: true
+      });
+
+      const { jsPDF } = window.jspdf;
+      const pdf = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
+      const pageWidth = pdf.internal.pageSize.getWidth();
+      const pageHeight = pdf.internal.pageSize.getHeight();
+      const margin = 12;
+
+      pdf.setFont('helvetica', 'bold');
+      pdf.setFontSize(18);
+      pdf.text('SUIVI-DECHETS - Ordre de mission', margin, 18);
+
+      pdf.setFont('helvetica', 'normal');
+      pdf.setFontSize(11);
+      pdf.text(`Tournee: ${routeData.id}`, margin, 26);
+      pdf.text(`Collecteur: ${routeData.collecteur || 'Equipe Elite'}`, margin, 32);
+      pdf.text(`Statut: ${routeData.statut || 'planifiee'}`, margin, 38);
+      pdf.text(`Genere le: ${formatTimestamp(new Date().toISOString())}`, margin, 44);
+
+      const imageWidth = pageWidth - margin * 2;
+      const imageHeight = (canvas.height * imageWidth) / canvas.width;
+      const imageY = 52;
+
+      if (imageY + imageHeight <= pageHeight - margin) {
+        pdf.addImage(canvas.toDataURL('image/png'), 'PNG', margin, imageY, imageWidth, imageHeight);
+      } else {
+        let remainingHeight = imageHeight;
+        let sourceY = 0;
+        const ratio = canvas.width / imageWidth;
+        let firstPage = true;
+
+        while (remainingHeight > 0) {
+          const availableHeight = firstPage ? pageHeight - imageY - margin : pageHeight - 2 * margin;
+          const sliceHeight = Math.min(remainingHeight, availableHeight);
+          const sliceCanvas = document.createElement('canvas');
+          sliceCanvas.width = canvas.width;
+          sliceCanvas.height = Math.floor(sliceHeight * ratio);
+          const sliceCtx = sliceCanvas.getContext('2d');
+
+          sliceCtx.drawImage(
+            canvas,
+            0,
+            sourceY,
+            canvas.width,
+            sliceCanvas.height,
+            0,
+            0,
+            canvas.width,
+            sliceCanvas.height
+          );
+
+          const yPosition = firstPage ? imageY : margin;
+          pdf.addImage(
+            sliceCanvas.toDataURL('image/png'),
+            'PNG',
+            margin,
+            yPosition,
+            imageWidth,
+            sliceHeight
+          );
+
+          remainingHeight -= sliceHeight;
+          sourceY += sliceCanvas.height;
+
+          if (remainingHeight > 0) {
+            pdf.addPage();
+            firstPage = false;
+          }
+        }
+      }
+
+      const filename = options.filename || `tournee-${routeData.id}.pdf`;
+      pdf.save(filename);
+      showToast('PDF genere avec succes', 'success');
+    } catch (err) {
+      console.error(err);
+      showToast('Echec de la generation du PDF', 'error');
+    } finally {
+      if (exportBtn) {
+        exportBtn.disabled = false;
+        exportBtn.textContent = previousText || 'Exporter PDF';
+      }
+    }
+  }
+
+  // === Repositionnement temps réel des poubelles ===
+  let positionSimulationInterval = null;
+
+  async function updateBinPosition(binId, newLat, newLng) {
+    try {
+      const response = await apiFetch(`/api/poubelles/${binId}/position`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ latitude: newLat, longitude: newLng })
+      });
+      if (response.ok) {
+        const updatedBin = await response.json();
+        const idx = state.poubelles.findIndex((p) => p.id === binId);
+        if (idx !== -1) {
+          state.poubelles[idx] = { ...state.poubelles[idx], ...updatedBin };
+          updateMarker(state.poubelles[idx]);
+        }
+        return true;
+      }
+    } catch (err) {
+      console.error('Erreur mise à jour position:', err);
+    }
+    return false;
+  }
+
+  function scheduleNextPositionTick() {
+    const delayMs = 45000 + Math.floor(Math.random() * 15001);
+    positionSimulationInterval = setTimeout(async () => {
+      const numToMove = Math.floor(Math.random() * 3) + 1;
+      const poubelles = state.poubelles.filter((p) => p.actif !== 0);
+
+      for (let i = 0; i < numToMove && poubelles.length > 0; i++) {
+        const randomIndex = Math.floor(Math.random() * poubelles.length);
+        const bin = poubelles[randomIndex];
+        const deltaLat = (Math.random() - 0.5) * 0.002;
+        const deltaLng = (Math.random() - 0.5) * 0.002;
+        const clamped = clampToLand(
+          Number(bin.latitude) + deltaLat,
+          Number(bin.longitude) + deltaLng
+        );
+        const newLat = clamped.lat;
+        const newLng = clamped.lng;
+        await updateBinPosition(bin.id, newLat, newLng);
+      }
+
+      scheduleNextPositionTick();
+    }, delayMs);
+  }
+
+  function startRealTimePositionSimulation() {
+    stopRealTimePositionSimulation();
+    scheduleNextPositionTick();
+    console.log('📍 Simulation repositionnement activée (45–60 s)');
+  }
+
+  function stopRealTimePositionSimulation() {
+    if (positionSimulationInterval) {
+      clearTimeout(positionSimulationInterval);
+      positionSimulationInterval = null;
+    }
+  }
+
+  const socket = io();
+
+  socket.on('connect', () => {
+    console.log('📡 Connecté au serveur temps réel');
+  });
+
+  socket.on('bin:position:update', (updatedBin) => {
+    const idx = state.poubelles.findIndex((p) => p.id === updatedBin.id);
+    if (idx !== -1) {
+      state.poubelles[idx] = { ...state.poubelles[idx], ...updatedBin };
+      updateMarker(state.poubelles[idx]);
+    }
+  });
+
+  socket.on('bin:update', (updatedBin) => {
+    const idx = state.poubelles.findIndex((p) => p.id === updatedBin.id);
+    if (idx !== -1) {
+      state.poubelles[idx] = { ...state.poubelles[idx], ...updatedBin };
+      updateMarker(state.poubelles[idx]);
+      if (state.activeTab === 'dashboard' || state.activeTab === 'carte') {
+        refreshActiveTabContent();
+      }
+    }
+  });
+
+  socket.on('alert:new', (alert) => {
+    state.alertes.unshift(alert);
+    showToast(`Alerte: ${alert.message}`, 'error');
+    updateAlertBadge();
+    if (state.activeTab === 'dashboard' || state.activeTab === 'alertes') {
+      refreshActiveTabContent();
+    }
+  });
+
+  socket.on('alert:resolved', (resolvedAlert) => {
+    state.alertes = state.alertes.filter((a) => a.id !== resolvedAlert.id);
+    showToast(`Alerte résolue: ${resolvedAlert.message}`, 'success');
+    updateAlertBadge();
+    if (state.activeTab === 'dashboard' || state.activeTab === 'alertes') {
+      refreshActiveTabContent();
+    }
+  });
+
+  socket.on('simulation:status', (status) => {
+    state.simulationActive = status.running;
+    updateSimulationUI();
+  });
+
+  socket.on('stats:update', (stats) => {
+    state.stats = { ...(state.stats || {}), ...stats };
+    if (state.activeTab === 'dashboard') {
+      updateDashboardStats(state.stats);
+      renderDashboardPerformance(state.stats);
+    }
+  });
+
+  function updateAlertBadge() {
+    const activeAlerts = state.alertes.filter((a) => !a.acknowledgeée).length;
+    const badge = document.getElementById('alert-badge');
+    const dot = document.getElementById('notif-dot');
+
+    if (activeAlerts > 0) {
+      badge.textContent = activeAlerts;
+      badge.classList.remove('hidden');
+      dot.classList.remove('hidden');
+    } else {
+      badge.classList.add('hidden');
+      dot.classList.add('hidden');
+    }
+  }
+
+  function updateSimulationUI() {
+    const btn = document.getElementById('sim-toggle');
+    const indicator = document.getElementById('sim-indicator');
+    if (!btn || !indicator) return;
+
+    if (state.simulationActive) {
+      btn.classList.add('active');
+      btn.innerHTML = `
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="4" width="16" height="16"/></svg>
+        <span>Arrêter Simulation</span>
+      `;
+      indicator.classList.remove('hidden');
+    } else {
+      btn.classList.remove('active');
+      btn.innerHTML = `
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+        <span>Simulateur IoT</span>
+      `;
+      indicator.classList.add('hidden');
+    }
+  }
+
+  function updateUserProfileUI() {
+    const storedUser = state.currentUser || JSON.parse(localStorage.getItem('user') || 'null');
+    if (!storedUser) return;
+
+    const fullName = [storedUser.prenom, storedUser.nom].filter(Boolean).join(' ').trim() || storedUser.email;
+    const initial = fullName.charAt(0).toUpperCase();
+    const roleLabel = storedUser.role || 'UTILISATEUR';
+
+    [
+      document.querySelector('.header__profile-name'),
+      document.querySelector('.sidebar__user-name')
+    ].forEach((node) => {
+      if (node) node.textContent = fullName;
+    });
+
+    [
+      document.querySelector('.header__profile-role'),
+      document.querySelector('.sidebar__user-role')
+    ].forEach((node) => {
+      if (node) node.textContent = roleLabel;
+    });
+
+    [
+      document.querySelector('.header__profile-avatar'),
+      document.querySelector('.sidebar__avatar')
+    ].forEach((node) => {
+      if (node) node.textContent = initial;
+    });
+  }
+
+  async function renderDashboard() {
+    const content = document.getElementById('page-content');
+    content.innerHTML = `
+      <div class="page-title animate-fade">
+        <h1>Tableau de Bord</h1>
+        <p>Gestion intelligente des déchets urbains - Temps réel</p>
+      </div>
+
+      <div class="stats-grid" id="stats-grid-container">
+        <div class="content__loading"><div class="spinner"></div></div>
+      </div>
+
+      <div class="dashboard-grid">
+        <div class="card animate-slide-up">
+          <div class="card__header">
+            <div class="card__header-left">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>
+              <h3>Réseau Urbain Premium - Bénin</h3>
+            </div>
+          </div>
+          <div class="card__body" style="padding: 0;">
+            <div class="map-container" id="dashboard-map"></div>
+          </div>
+        </div>
+
+        <div class="space-y-20">
+          <div class="card animate-slide-up">
+            <div class="card__header">
+              <div class="card__header-left">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/></svg>
+                <h3>Alertes Critiques</h3>
+              </div>
+            </div>
+            <div class="card__body" style="padding: 0;" id="dashboard-alerts"></div>
+          </div>
+
+          <div class="card animate-slide-up">
+            <div class="card__header">
+              <div class="card__header-left">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="12 2 2 7 12 12 22 7 12 2"/><polyline points="2 17 12 22 22 17"/><polyline points="2 12 12 17 22 12"/></svg>
+                <h3>Performances du Réseau</h3>
+              </div>
+            </div>
+            <div class="card__body" id="dashboard-performance"></div>
+          </div>
+        </div>
+      </div>
+    `;
+
+    try {
+      const stats = await API.getStats();
+      state.stats = stats;
+      updateDashboardStats(state.stats);
+      renderDashboardAlerts();
+      renderDashboardPerformance(state.stats);
+      await initGoogleMap('dashboard-map', { mode: 'dashboard', cluster: true });
+    } catch (err) {
+      console.error(err);
+      showToast('Erreur de chargement du dashboard cartographique', 'error');
+    }
+  }
+
+  function updateDashboardStats(stats) {
+    const statsGrid = document.getElementById('stats-grid-container');
+    if (!statsGrid) return;
+
+    statsGrid.innerHTML = `
+      <div class="stat-card stat-card--blue animate-slide-up">
+        <div class="stat-card__header">
+          <span class="stat-card__label">Total Poubelles</span>
+          <div class="stat-card__icon">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+          </div>
+        </div>
+        <div class="stat-card__value">${stats.total_poubelles}</div>
+        <div class="stat-card__sub">Actives sur le réseau</div>
+      </div>
+
+      <div class="stat-card stat-card--emerald animate-slide-up" style="animation-delay: 0.1s;">
+        <div class="stat-card__header">
+          <span class="stat-card__label">Remplissage Moyen</span>
+          <div class="stat-card__icon">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
+          </div>
+        </div>
+        <div class="stat-card__value">${stats.niveau_moyen}%</div>
+        <div class="stat-card__sub">Moyenne générale</div>
+      </div>
+
+      <div class="stat-card stat-card--red animate-slide-up" style="animation-delay: 0.2s;">
+        <div class="stat-card__header">
+          <span class="stat-card__label">Alertes Actives</span>
+          <div class="stat-card__icon">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/></svg>
+          </div>
+        </div>
+        <div class="stat-card__value">${stats.alertes_actives}</div>
+        <div class="stat-card__sub">Requiert action immédiate</div>
+      </div>
+
+      <div class="stat-card stat-card--purple animate-slide-up" style="animation-delay: 0.3s;">
+        <div class="stat-card__header">
+          <span class="stat-card__label">Tournées Actives</span>
+          <div class="stat-card__icon">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="6" cy="19" r="3"/><path d="M9 19h8.5a3.5 3.5 0 0 0 0-7h-11a3.5 3.5 0 0 1 0-7H15"/></svg>
+          </div>
+        </div>
+        <div class="stat-card__value">${stats.tournees_actives}</div>
+        <div class="stat-card__sub">Collecteurs en service</div>
+      </div>
+    `;
+  }
+
+  function renderDashboardAlerts() {
+    const alertsContainer = document.getElementById('dashboard-alerts');
+    if (!alertsContainer) return;
+
+    const activeAlerts = state.alertes.filter((a) => !a.acknowledgeée).slice(0, 4);
+
+    if (activeAlerts.length === 0) {
+      alertsContainer.innerHTML = `
+        <div style="padding: 30px; text-align: center; color: var(--text-muted);">
+          <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-bottom: 8px; opacity: 0.5;"><circle cx="12" cy="12" r="10"/><path d="M8 12h8"/></svg>
+          <p>Aucune alerte active</p>
+        </div>
+      `;
+      return;
+    }
+
+    alertsContainer.innerHTML = activeAlerts.map((alert) => `
+      <div class="alert-item">
+        <div class="alert-item__left">
+          <div class="alert-item__icon alert-item__icon--critical">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/></svg>
+          </div>
+          <div>
+            <div class="alert-item__name">${alert.poubelle_nom || 'Poubelle'}</div>
+            <div class="alert-item__detail">${alert.quartier} — ${alert.message}</div>
+          </div>
+        </div>
+        <div class="alert-item__actions">
+          <button class="btn btn--primary btn--sm btn-ack" data-id="${alert.id}">Traiter</button>
+        </div>
+      </div>
+    `).join('');
+
+    alertsContainer.querySelectorAll('.btn-ack').forEach((btn) => {
+      btn.addEventListener('click', async (event) => {
+        const id = event.currentTarget.getAttribute('data-id');
+        try {
+          const resolved = await API.acknowledgeAlert(id);
+          if (resolved.error) throw new Error(resolved.error);
+          state.alertes = state.alertes.filter((a) => a.id !== parseInt(id, 10));
+          updateAlertBadge();
+          renderDashboardAlerts();
+          showToast('Alerte traitée avec succès', 'success');
+        } catch (err) {
+          showToast('Erreur lors du traitement', 'error');
+        }
+      });
+    });
+  }
+
+  function renderDashboardPerformance(stats) {
+    const perfContainer = document.getElementById('dashboard-performance');
+    if (!perfContainer) return;
+
+    perfContainer.innerHTML = `
+      <div class="progress">
+        <div class="progress__header">
+          <span class="progress__label">Couverture réseau</span>
+          <span class="progress__value">${stats.couverture_reseau}%</span>
+        </div>
+        <div class="progress__bar">
+          <div class="progress__fill progress__fill--green" style="width: ${stats.couverture_reseau}%"></div>
+        </div>
+      </div>
+
+      <div class="progress">
+        <div class="progress__header">
+          <span class="progress__label">Taux de collecte</span>
+          <span class="progress__value">${stats.taux_collecte}%</span>
+        </div>
+        <div class="progress__bar">
+          <div class="progress__fill progress__fill--blue" style="width: ${stats.taux_collecte}%"></div>
+        </div>
+      </div>
+
+      <div class="progress">
+        <div class="progress__header">
+          <span class="progress__label">Satisfaction usagers</span>
+          <span class="progress__value">${stats.satisfaction}%</span>
+        </div>
+        <div class="progress__bar">
+          <div class="progress__fill progress__fill--purple" style="width: ${stats.satisfaction}%"></div>
+        </div>
+      </div>
+    `;
+  }
+
+  async function renderCarte() {
+    const content = document.getElementById('page-content');
+    content.innerHTML = `
+      <div class="page-title animate-fade">
+        <h1>Carte Interactive Google Maps</h1>
+        <p>Vue premium temps réel sur Abomey-Calavi, Cotonou et Porto-Novo</p>
+      </div>
+
+      <div class="card animate-slide-up" style="height: calc(100vh - 180px);">
+        <div class="card__body" style="padding: 0; height: 100%;">
+          <div class="map-container map-fullpage" id="full-map"></div>
+        </div>
+      </div>
+    `;
+
+    try {
+      await initGoogleMap('full-map', { mode: 'carte', cluster: true });
+    } catch (err) {
+      console.error(err);
+      const msg = err?.message ? String(err.message) : 'Google Maps indisponible pour la vue carte';
+      showToast(msg, 'error');
+    }
+  }
+
+  async function renderTournees() {
+    const content = document.getElementById('page-content');
+    const binsToCollect = state.poubelles.filter((p) => Number(p.niveau || 0) >= 70);
+
+    content.innerHTML = `
+      <div class="page-title animate-fade">
+        <h1>Optimisation de Tournée</h1>
+        <p>Itinéraires premium en mode DRIVING avec trafic temps réel</p>
+      </div>
+
+      <div class="dashboard-grid animate-slide-up">
+        <div class="card">
+          <div class="card__header">
+            <div class="card__header-left">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="6" cy="19" r="3"/><path d="M9 19h8.5a3.5 3.5 0 0 0 0-7h-11a3.5 3.5 0 0 1 0-7H15"/></svg>
+              <h3>Sélectionner les points de collecte (Remplissage &ge; 70%)</h3>
+            </div>
+            <button class="btn btn--primary btn--sm" id="btn-select-all">Sélectionner tout</button>
+          </div>
+          <div class="card__body">
+            <div class="tournee-grid" id="tournee-select-grid">
+              ${binsToCollect.length === 0 ? `
+                <div style="grid-column: 1/-1; text-align: center; padding: 40px; color: var(--text-muted);">
+                  <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-bottom: 8px; opacity: 0.5;"><circle cx="12" cy="12" r="10"/><path d="M8 12h8"/></svg>
+                  <p>Aucune poubelle ne nécessite de collecte urgente (&ge; 70%)</p>
+                </div>
+              ` : binsToCollect.map((bin) => `
+                <label class="tournee-checkbox ${state.selectedBins.includes(bin.id) ? 'checked' : ''}" data-id="${bin.id}">
+                  <input type="checkbox" value="${bin.id}" ${state.selectedBins.includes(bin.id) ? 'checked' : ''}>
+                  <div>
+                    <div class="tournee-checkbox__name">${bin.nom}</div>
+                    <div class="tournee-checkbox__detail">${bin.quartier} • ${bin.niveau}%</div>
+                  </div>
+                </label>
+              `).join('')}
+            </div>
+
+            <div style="margin-top: 20px; display: flex; justify-content: flex-end;">
+              <button class="btn btn--primary" id="btn-generate-route" ${state.selectedBins.length < 2 ? 'disabled' : ''}>
+                Générer itinéraire optimal
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <div class="space-y-20">
+          <div class="card" id="route-result-container">
+            <div style="padding: 40px; text-align: center; color: var(--text-muted);">
+              <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-bottom: 12px; opacity: 0.4;"><polygon points="12 2 2 7 12 12 22 7 12 2"/><polyline points="2 17 12 22 22 17"/><polyline points="2 12 12 17 22 12"/></svg>
+              <p>Sélectionnez au moins 2 points pour calculer un trajet DRIVING Google Maps.</p>
+            </div>
+          </div>
+
+          <div class="card" style="height: 320px; padding:0; overflow:hidden;">
+            <div id="route-map" style="width:100%; height:100%;"></div>
+          </div>
+        </div>
+      </div>
+    `;
+
+    try {
+      await initGoogleMap('route-map', {
+        mode: 'route',
+        cluster: false,
+        enableDirections: true,
+        showAllBins: false,
+        zoom: 11
+      });
+      addBinMarkers(binsToCollect, { cluster: false });
+    } catch (err) {
+      console.error(err);
+      showToast('Google Maps indisponible pour les tournées', 'error');
+    }
+
+    const checkboxes = content.querySelectorAll('.tournee-checkbox');
+    checkboxes.forEach((checkboxNode) => {
+      checkboxNode.addEventListener('click', (event) => {
+        event.preventDefault();
+        const checkbox = checkboxNode.querySelector('input');
+        const id = checkboxNode.getAttribute('data-id');
+
+        checkbox.checked = !checkbox.checked;
+        if (checkbox.checked) {
+          checkboxNode.classList.add('checked');
+          if (!state.selectedBins.includes(id)) state.selectedBins.push(id);
+        } else {
+          checkboxNode.classList.remove('checked');
+          state.selectedBins = state.selectedBins.filter((value) => value !== id);
+        }
+
+        document.getElementById('btn-generate-route').disabled = state.selectedBins.length < 2;
+      });
+    });
+
+    const selectAllBtn = document.getElementById('btn-select-all');
+    if (selectAllBtn) {
+      selectAllBtn.addEventListener('click', () => {
+        const allIds = binsToCollect.map((bin) => bin.id);
+        const allCheckboxes = content.querySelectorAll('.tournee-checkbox');
+
+        if (state.selectedBins.length === binsToCollect.length) {
+          state.selectedBins = [];
+          allCheckboxes.forEach((node) => {
+            node.classList.remove('checked');
+            node.querySelector('input').checked = false;
+          });
+        } else {
+          state.selectedBins = [...allIds];
+          allCheckboxes.forEach((node) => {
+            node.classList.add('checked');
+            node.querySelector('input').checked = true;
+          });
+        }
+
+        document.getElementById('btn-generate-route').disabled = state.selectedBins.length < 2;
+      });
+    }
+
+    document.getElementById('btn-generate-route')?.addEventListener('click', generateRoute);
+  }
+
+  async function generateRoute() {
+    const resultContainer = document.getElementById('route-result-container');
+    resultContainer.innerHTML = `<div class="content__loading"><div class="spinner"></div><p>Optimisation du trajet DRIVING...</p></div>`;
+
+    try {
+      const data = await API.optimizeRoute(state.selectedBins);
+      if (data.error) {
+        throw new Error(data.error);
+      }
+
+      const routeResult = await calculateRoute(data.route);
+      const distanceKm = (routeResult && routeResult.distanceKm !== null) ? routeResult.distanceKm : data.distance_totale;
+      const durationMin = (routeResult && routeResult.durationMin !== null) ? routeResult.durationMin : data.duree_estimee;
+      const fuelEstimate = Math.round(distanceKm * 0.12 * 100) / 100;
+      const co2Saved = Math.round(Math.max(distanceKm * 1.25 - distanceKm, 0) * 2.31 * 100) / 100;
+      const orderedStops = routeResult?.orderedStops ?? data.route;
+
+      state.currentRoute = {
+        ...data,
+        route: orderedStops,
+        distance_totale: distanceKm,
+        duree_estimee: durationMin,
+        carburant_estime: fuelEstimate,
+        co2_economise: co2Saved,
+        statut: 'planifiée',
+        collecteur: 'Equipe Elite'
+      };
+
+      resultContainer.innerHTML = `
+        <div class="route-result" data-route-id="${data.id}">
+          <div class="route-result__header">
+            <div class="route-result__icon">
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>
+            </div>
+            <div>
+              <div class="route-result__title">${routeResult?.isFallback ? 'Itinéraire Vol d\'oiseau Généré (Fallback)' : 'Itinéraire Google Maps Généré'}</div>
+              <div class="route-result__sub">${data.nb_points} poubelles optimisées + Dépôt</div>
+            </div>
+          </div>
+
+          <div class="route-summary">
+            <div class="route-summary__item">
+              <span class="route-summary__label">ID</span>
+              <strong>${data.id}</strong>
+            </div>
+            <div class="route-summary__item">
+              <span class="route-summary__label">Collecteur</span>
+              <strong id="route-collector-name">Equipe Elite</strong>
+            </div>
+            <div class="route-summary__item">
+              <span class="route-summary__label">Statut</span>
+              <strong id="route-status-badge" class="route-status route-status--planned">Planifiée</strong>
+            </div>
+          </div>
+
+          <div class="route-steps">
+            ${orderedStops.map((point, index) => `
+              <div class="route-step">
+                <div class="route-step__num ${point.id === 'depot' ? 'route-step__num--depot' : 'route-step__num--stop'}">${index + 1}</div>
+                <div>
+                  <strong>${point.nom}</strong>
+                  <span style="font-size: 11px; color: var(--text-secondary);">(${point.quartier})</span>
+                </div>
+              </div>
+            `).join('')}
+          </div>
+
+          <div class="route-metrics">
+            <div>
+              <div class="route-metric__label">${routeResult?.isFallback ? 'Distance vol d\'oiseau' : 'Distance DRIVING'}</div>
+              <div class="route-metric__value">${distanceKm} km</div>
+            </div>
+            <div>
+              <div class="route-metric__label">Durée Trajet</div>
+              <div class="route-metric__value">${durationMin} min</div>
+            </div>
+            <div>
+              <div class="route-metric__label">Carburant Requis</div>
+              <div class="route-metric__value">${fuelEstimate} L</div>
+            </div>
+            <div>
+              <div class="route-metric__label">CO2 Économisé</div>
+              <div class="route-metric__value route-metric__value--green">${co2Saved} kg</div>
+            </div>
+          </div>
+
+          <div class="route-actions">
+            <button class="btn btn--primary" id="btn-export-pdf">Exporter PDF</button>
+            <button class="btn btn--dark" id="btn-share-collector">Assigner Tournée</button>
+          </div>
+        </div>
+      `;
+
+      document.getElementById('btn-export-pdf').addEventListener('click', async () => {
+        await exportRoutePdf(state.currentRoute);
+      });
+
+      document.getElementById('btn-share-collector').addEventListener('click', async () => {
+        if (!state.currentRoute?.id) {
+          showToast('Aucune tournée à assigner', 'error');
+          return;
+        }
+
+        const assignBtn = document.getElementById('btn-share-collector');
+        const originalText = assignBtn.textContent;
+        assignBtn.disabled = true;
+        assignBtn.textContent = 'Assignation...';
+
+        try {
+          const updatedRoute = await API.assignRoute(
+            state.currentRoute.id,
+            state.currentRoute.collecteur || 'Equipe Elite'
+          );
+
+          if (updatedRoute.error) {
+            throw new Error(updatedRoute.error);
+          }
+
+          state.currentRoute = {
+            ...state.currentRoute,
+            ...updatedRoute
+          };
+
+          const collectorNode = document.getElementById('route-collector-name');
+          const statusNode = document.getElementById('route-status-badge');
+
+          if (collectorNode) collectorNode.textContent = state.currentRoute.collecteur;
+          if (statusNode) {
+            statusNode.textContent = 'Assignée';
+            statusNode.className = 'route-status route-status--assigned';
+          }
+
+          showToast('Tournée assignée et enregistrée en base', 'success');
+          await exportRoutePdf(state.currentRoute, {
+            filename: `ordre-mission-${state.currentRoute.id}.pdf`
+          });
+        } catch (err) {
+          console.error(err);
+          showToast('Erreur lors de l assignation', 'error');
+        } finally {
+          assignBtn.disabled = false;
+          assignBtn.textContent = originalText;
+        }
+      });
+    } catch (err) {
+      console.error(err);
+      showToast('Erreur lors du calcul de tournée', 'error');
+      resultContainer.innerHTML = `
+        <div style="padding: 40px; text-align: center; color: var(--red);">
+          <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-bottom: 12px; opacity: 0.8;"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+          <p>Échec du calcul : ${err.message || 'Erreur inconnue'}</p>
+        </div>
+      `;
+    }
+  }
+
+  function renderAlertes() {
+    const content = document.getElementById('page-content');
+    content.innerHTML = `
+      <div class="page-title animate-fade">
+        <h1>Gestion des Alertes</h1>
+        <p>Visualisation et acquittement des alertes du réseau IoT</p>
+      </div>
+
+      <div class="dashboard-grid">
+        <div class="card animate-slide-up">
+          <div class="card__header">
+            <div class="card__header-left">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/></svg>
+              <h3>Alertes Actives</h3>
+            </div>
+          </div>
+          <div class="card__body" style="padding: 0;" id="full-alerts-list"></div>
+        </div>
+
+        <div class="card animate-slide-up">
+          <div class="card__header">
+            <div class="card__header-left">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 8v4l3 3"/></svg>
+              <h3>Historique Récent</h3>
+            </div>
+          </div>
+          <div class="card__body" id="alerts-history"></div>
+        </div>
+      </div>
+    `;
+
+    renderFullAlertsList();
+    renderAlertsHistory();
+  }
+
+  function renderFullAlertsList() {
+    const list = document.getElementById('full-alerts-list');
+    if (!list) return;
+
+    const active = state.alertes.filter((a) => !a.acknowledgeée);
+
+    if (active.length === 0) {
+      list.innerHTML = `
+        <div style="padding: 40px; text-align: center; color: var(--text-muted);">
+          <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-bottom: 8px; opacity: 0.5;"><polyline points="20 6 9 17 4 12"/></svg>
+          <p>Aucune alerte en attente. Tout est sous contrôle.</p>
+        </div>
+      `;
+      return;
+    }
+
+    list.innerHTML = active.map((alert) => `
+      <div class="alert-item">
+        <div class="alert-item__left">
+          <div class="alert-item__icon ${alert.severite === 'critical' ? 'alert-item__icon--critical' : 'alert-item__icon--warning'}">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/></svg>
+          </div>
+          <div>
+            <div class="alert-item__name">${alert.poubelle_nom} (${alert.quartier})</div>
+            <div class="alert-item__detail">${alert.message}</div>
+          </div>
+        </div>
+        <div class="alert-item__actions">
+          <button class="btn btn--primary btn-ack-full" data-id="${alert.id}">Résoudre</button>
+        </div>
+      </div>
+    `).join('');
+
+    list.querySelectorAll('.btn-ack-full').forEach((btn) => {
+      btn.addEventListener('click', async (event) => {
+        const id = event.currentTarget.getAttribute('data-id');
+        try {
+          const resolved = await API.acknowledgeAlert(id);
+          if (resolved.error) throw new Error(resolved.error);
+          state.alertes = state.alertes.filter((a) => a.id !== parseInt(id, 10));
+          updateAlertBadge();
+          renderFullAlertsList();
+          renderAlertsHistory();
+          showToast('Alerte résolue et enregistrée', 'success');
+        } catch (err) {
+          showToast('Erreur', 'error');
+        }
+      });
+    });
+  }
+
+  async function renderAlertsHistory() {
+    const container = document.getElementById('alerts-history');
+    if (!container) return;
+
+    try {
+      const res = await apiFetch('/api/alertes?active=false');
+      const allAlerts = await res.json();
+      const resolved = allAlerts.filter((alert) => alert.acknowledgeée);
+
+      if (resolved.length === 0) {
+        container.innerHTML = `
+          <div style="padding: 30px; text-align: center; color: var(--text-muted);">
+            <p>Historique vide.</p>
+          </div>
+        `;
+        return;
+      }
+
+      container.innerHTML = resolved.slice(0, 8).map((alert) => `
+        <div class="history-item">
+          <div>
+            <div class="history-item__name">${alert.poubelle_nom}</div>
+            <div class="history-item__detail">${alert.quartier} • Niveau: ${alert.niveau || '--'}%</div>
+          </div>
+          <div class="history-item__value">
+            <span class="text-green" style="font-weight: 700;">Traité</span>
+            <div class="history-item__time">${new Date(alert.resolved_at).toLocaleTimeString('fr-FR')}</div>
+          </div>
+        </div>
+      `).join('');
+    } catch (err) {
+      container.innerHTML = `<p style="color: var(--red);">Erreur lors de la récupération</p>`;
+    }
+  }
+
+  function renderStatistiques() {
+    const content = document.getElementById('page-content');
+    content.innerHTML = `
+      <div class="page-title animate-fade">
+        <h1>Rapports & Statistiques</h1>
+        <p>Analyses avancées et prédictions sur la production des déchets</p>
+      </div>
+
+      <div class="stats-page-grid animate-slide-up">
+        <div class="card">
+          <div class="card__header">
+            <div class="card__header-left">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
+              <h3>Top Quartiers Producteurs de Déchets</h3>
+            </div>
+          </div>
+          <div class="card__body">
+            <div class="chart-container">
+              <canvas id="quartiers-chart"></canvas>
+            </div>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card__header">
+            <div class="card__header-left">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
+              <h3>Performances Écologiques</h3>
+            </div>
+          </div>
+          <div class="card__body">
+            <div style="display: flex; flex-direction: column; gap: 20px;">
+              <div style="background: var(--bg-primary); padding: 20px; border-radius: var(--radius-md); text-align: center;">
+                <div style="font-size: 13px; color: var(--text-secondary);">Total CO2 Économisé</div>
+                <div style="font-size: 32px; font-weight: 800; color: var(--emerald); margin-top: 6px;">148.5 kg</div>
+                <div style="font-size: 11px; color: var(--text-muted); margin-top: 4px;">Grâce aux itinéraires optimisés</div>
+              </div>
+
+              <div style="background: var(--bg-primary); padding: 20px; border-radius: var(--radius-md); text-align: center;">
+                <div style="font-size: 13px; color: var(--text-secondary);">Taux d Efficacité Énergétique</div>
+                <div style="font-size: 32px; font-weight: 800; color: var(--blue); margin-top: 6px;">96.4%</div>
+                <div style="font-size: 11px; color: var(--text-muted); margin-top: 4px;">Autonomie moyenne des batteries capteurs</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    `;
+
+    setTimeout(drawCharts, 100);
+  }
+
+  function drawCharts() {
+    const canvas = document.getElementById('quartiers-chart');
+    if (!canvas) return;
+
+    const quartierMap = new Map();
+    state.poubelles.forEach((bin) => {
+      const quartier = bin.quartier || 'Inconnu';
+      const level = Number(bin.niveau || 0);
+      const current = quartierMap.get(quartier) || { total: 0, count: 0 };
+      current.total += level;
+      current.count += 1;
+      quartierMap.set(quartier, current);
+    });
+
+    const data = Array.from(quartierMap.entries())
+      .map(([label, values]) => ({
+        label,
+        value: Math.round(values.total / values.count)
+      }))
+      .sort((a, b) => b.value - a.value)
+      .slice(0, 5);
+
+    if (data.length === 0) {
+      const ctx = canvas.getContext('2d');
+      const width = canvas.offsetWidth;
+      const height = canvas.offsetHeight;
+      canvas.width = width * window.devicePixelRatio;
+      canvas.height = height * window.devicePixelRatio;
+      ctx.scale(window.devicePixelRatio, window.devicePixelRatio);
+      ctx.fillStyle = '#94a3b8';
+      ctx.font = '500 14px Inter';
+      ctx.textAlign = 'center';
+      ctx.fillText('Aucune donnee disponible', width / 2, height / 2);
+      return;
+    }
+
+    if (state.quartiersChart) {
+      state.quartiersChart.destroy();
+    }
+
+    state.quartiersChart = new Chart(canvas, {
+      type: 'bar',
+      data: {
+        labels: data.map((item) => item.label),
+        datasets: [{
+          label: 'Remplissage moyen (%)',
+          data: data.map((item) => item.value),
+          backgroundColor: ['#10b981', '#22c55e', '#34d399', '#3b82f6', '#60a5fa'],
+          borderRadius: 12,
+          borderSkipped: false
+        }]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+          legend: { display: false }
+        },
+        scales: {
+          x: {
+            grid: { display: false },
+            ticks: { color: '#64748b', font: { family: 'Inter' } }
+          },
+          y: {
+            beginAtZero: true,
+            max: 100,
+            ticks: { color: '#94a3b8', callback: (value) => `${value}%` },
+            grid: { color: '#e2e8f0' }
+          }
+        }
+      }
+    });
+  }
+
+  function refreshActiveTabContent() {
+    if (state.activeTab === 'dashboard') {
+      if (state.stats) {
+        updateDashboardStats(state.stats);
+        renderDashboardPerformance(state.stats);
+      }
+      renderDashboardAlerts();
+    } else if (state.activeTab === 'tournees') {
+      renderTournees();
+    } else if (state.activeTab === 'alertes') {
+      renderFullAlertsList();
+      renderAlertsHistory();
+    } else if (state.activeTab === 'statistiques') {
+      renderStatistiques();
+    }
+  }
+
+  function setupNavigation() {
+    updateUserProfileUI();
+
+    if (!document.getElementById('logout-btn')) {
+      const logoutBtn = document.createElement('button');
+      logoutBtn.id = 'logout-btn';
+      logoutBtn.className = 'header__btn';
+      logoutBtn.title = 'Se déconnecter';
+      logoutBtn.innerHTML = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>';
+      logoutBtn.addEventListener('click', async () => {
+        try {
+          await API.logout();
+        } finally {
+          clearSession();
+          window.location.href = '/login';
+        }
+      });
+      document.querySelector('.header__right')?.prepend(logoutBtn);
+    }
+
+    const links = document.querySelectorAll('.sidebar__link');
+    links.forEach((link) => {
+      link.addEventListener('click', (event) => {
+        links.forEach((item) => item.classList.remove('sidebar__link--active'));
+        const activeLink = event.currentTarget;
+        activeLink.classList.add('sidebar__link--active');
+
+        state.activeTab = activeLink.getAttribute('data-tab');
+
+        if (state.activeTab === 'dashboard') renderDashboard();
+        else if (state.activeTab === 'carte') renderCarte();
+        else if (state.activeTab === 'tournees') renderTournees();
+        else if (state.activeTab === 'alertes') renderAlertes();
+        else if (state.activeTab === 'statistiques') renderStatistiques();
+
+        if (window.innerWidth <= 768) {
+          document.getElementById('sidebar').classList.remove('sidebar--open');
+        }
+      });
+    });
+
+    const toggleBtn = document.getElementById('sidebar-toggle');
+    const sidebar = document.getElementById('sidebar');
+    const main = document.querySelector('.main');
+
+    toggleBtn.addEventListener('click', () => {
+      sidebar.classList.toggle('sidebar--open');
+      if (window.innerWidth > 768) {
+        sidebar.classList.toggle('sidebar--collapsed');
+        main.classList.toggle('main--collapsed');
+      }
+    });
+
+    document.getElementById('sim-toggle').addEventListener('click', async () => {
+      try {
+        const nextState = !state.simulationActive;
+        await API.toggleSimulation(nextState);
+        state.simulationActive = nextState;
+        updateSimulationUI();
+        showToast(state.simulationActive ? 'Simulateur IoT démarré' : 'Simulateur IoT arrêté', 'info');
+      } catch (err) {
+        showToast('Erreur simulateur', 'error');
+      }
+    });
+
+    document.getElementById('refresh-btn').addEventListener('click', async () => {
+      const btn = document.getElementById('refresh-btn');
+      btn.style.transform = 'rotate(360deg)';
+      btn.style.transition = 'transform 0.8s ease';
+
+      try {
+        state.poubelles = await API.getPoubelles();
+        state.alertes = await API.getAlertes();
+        state.stats = await API.getStats();
+        updateAlertBadge();
+
+        if (state.map && (state.activeTab === 'dashboard' || state.activeTab === 'carte')) {
+          addBinMarkers(state.poubelles, { cluster: true });
+        }
+
+        refreshActiveTabContent();
+        showToast('Données actualisées', 'success');
+      } catch (err) {
+        showToast('Échec de la synchronisation', 'error');
+      }
+
+      setTimeout(() => {
+        btn.style.transform = 'none';
+        btn.style.transition = 'none';
+      }, 800);
+    });
+
+    const searchInput = document.getElementById('search-input');
+    searchInput.addEventListener('input', (event) => {
+      const query = event.target.value.toLowerCase().trim();
+
+      if (!query) {
+        Object.values(state.markers).forEach((record) => {
+          record.marker.setVisible(true);
+        });
+        return;
+      }
+
+      let firstMatch = null;
+      Object.values(state.markers).forEach((record) => {
+        const bin = record.bin;
+        const match = bin.nom.toLowerCase().includes(query) || bin.quartier.toLowerCase().includes(query);
+        record.marker.setVisible(match);
+        if (!firstMatch && match) {
+          firstMatch = record.marker;
+        }
+      });
+
+      if (firstMatch && state.map) {
+        state.map.panTo(firstMatch.getPosition());
+        state.map.setZoom(Math.max(state.map.getZoom(), 14));
+      }
+    });
+  }
+
+  async function init() {
+    try {
+      state.currentUser = JSON.parse(localStorage.getItem('user') || 'null');
+      const me = await API.getMe();
+      if (me?.error) {
+        throw new Error(me.error);
+      }
+
+      state.currentUser = me;
+      localStorage.setItem('user', JSON.stringify(me));
+      updateUserProfileUI();
+
+      registerServiceWorker();
+      setupPwaInstallPrompt();
+      await initPushNotifications();
+
+      state.poubelles = await API.getPoubelles();
+      state.alertes = await API.getAlertes();
+      state.stats = await API.getStats();
+      const simStatus = await API.getSimulationStatus();
+      state.simulationActive = simStatus.running;
+
+      updateAlertBadge();
+      updateSimulationUI();
+      setupNavigation();
+      await renderDashboard();
+      if (['SUPER_ADMIN', 'ADMIN'].includes(state.currentUser?.role)) {
+        startRealTimePositionSimulation();
+      }
+    } catch (err) {
+      console.error(err);
+      clearSession();
+      if (window.location.pathname !== '/login') {
+        window.location.href = '/login';
+      }
+    }
+  }
+
+  init();
+});
