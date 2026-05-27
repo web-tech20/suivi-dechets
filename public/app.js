@@ -1,7 +1,7 @@
 // ═══════════════════════════════════════════════════════════════
 // SUIVI-DÉCHETS — Frontend App (Vanilla JS SPA)
 // ═══════════════════════════════════════════════════════════════
-
+const API_URL = 'https://suivi-dechets.onrender.com';
 const bootToken = localStorage.getItem('accessToken');
 if (!bootToken && window.location.pathname !== '/login') {
   window.location.href = '/login';
