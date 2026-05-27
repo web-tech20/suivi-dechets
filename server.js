@@ -891,3 +891,7 @@ server.listen(PORT, () => {
   ╚═══════════════════════════════════════════════╝
   `);
 });
+
+app.use(cors({
+  origin: ['http://localhost:3000', 'https://smart-drop-kappa.vercel.app', 'https://suivi-dechets.onrender.com']
+}));
