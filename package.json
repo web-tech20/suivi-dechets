@@ -1,3 +1,6 @@
+"scripts": {
+  "start": "node server.js"
+}
 {
   "name": "suivi-dechets",
   "version": "1.0.0",
