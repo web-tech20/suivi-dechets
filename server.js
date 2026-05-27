@@ -24,11 +24,27 @@ const db = initDatabase({ keepOpen: true });
 
 const app = express();
 const server = http.createServer(app);
-const io = new Server(server, { cors: { origin: '*' } });
+
+const corsOrigins = [
+  'http://localhost:3000',
+  'http://localhost:5173',
+  'https://suivi-dechets.onrender.com',
+  'https://suivi-dechets.vercel.app'
+];
+
+const io = new Server(server, { 
+  cors: { 
+    origin: corsOrigins,
+    credentials: true
+  } 
+});
 setDatabase(db);
 
 // ── Middleware ────────────────────────────────────────────────
-app.use(cors());
+app.use(cors({
+  origin: corsOrigins,
+  credentials: true
+}));
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
 app.use('/vendor', express.static(path.join(__dirname, 'node_modules')));

@@ -8,6 +8,11 @@ if (!bootToken && window.location.pathname !== '/login') {
 }
 
 document.addEventListener('DOMContentLoaded', () => {
+  // API endpoint — use Render backend in production, localhost in dev
+  const API_URL = window.location.hostname === 'localhost' 
+    ? 'http://localhost:3000' 
+    : 'https://suivi-dechets.onrender.com';
+
   const MAP_CENTER = [6.4486, 2.3553];
   const MAP_MAX_BOUNDS = [[6.43, 2.33], [6.47, 2.38]];
   const LAND_BOUNDS = { latMin: 6.435, latMax: 6.465, lngMin: 2.335, lngMax: 2.375 };
@@ -77,7 +82,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const refreshToken = getRefreshToken();
     if (!refreshToken) return false;
 
-    const response = await fetch('/api/auth/refresh', {
+    const response = await fetch(`${API_URL}/api/auth/refresh`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ refreshToken })
@@ -101,7 +106,9 @@ document.addEventListener('DOMContentLoaded', () => {
       headers.Authorization = `Bearer ${token}`;
     }
 
-    const response = await fetch(url, { ...options, headers });
+    // Prepend API_URL to relative paths
+    const fullUrl = url.startsWith('http') ? url : `${API_URL}${url}`;
+    const response = await fetch(fullUrl, { ...options, headers });
 
     if (response.status === 401 && retry) {
       let payload = null;
@@ -778,7 +785,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const demoBins = ['ESP-DEMO-01', 'ESP-DEMO-02', 'ESP-DEMO-03'];
     for (const esp32Id of demoBins) {
       try {
-        await fetch('/api/iot/releve', {
+        await fetch(`${API_URL}/api/iot/releve`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -1143,7 +1150,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   }
 
-  const socket = io();
+  const socket = io(API_URL, { transports: ['websocket', 'polling'] });
 
   socket.on('connect', () => {
     console.log('📡 Connecté au serveur temps réel');
