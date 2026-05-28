@@ -10,7 +10,8 @@
     "generate-bins": "node scripts/generate-bins.js",
     "simulate-esp32": "node scripts/simulate-esp32.js",
     "generate-mass-alerts": "node scripts/generate-mass-alerts.js",
-    "validate-demo": "bash scripts/validate-demo.sh"
+    "validate-demo": "bash scripts/validate-demo.sh",
+    "vercel-build": "npx terser public/app.js -o public/app.js -m -c && npx clean-css-cli -o public/styles.css public/styles.css"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",
