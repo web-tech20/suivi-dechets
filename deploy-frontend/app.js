@@ -1,13 +1,7 @@
 // ═══════════════════════════════════════════════════════════════
 // SUIVI-DÉCHETS — Frontend App (Vanilla JS SPA)
 // ═══════════════════════════════════════════════════════════════
-// Détection auto environnement (localhost ou Render)
-const API_URL = window.location.hostname === 'localhost'
-  ? 'http://localhost:3000'
-  : 'https://suivi-dechets.onrender.com';
 
-// Socket will be initialized once below (after DOM ready)
-let socket = null;
 const bootToken = localStorage.getItem('accessToken');
 if (!bootToken && window.location.pathname !== '/login') {
   window.location.href = '/login';
@@ -83,7 +77,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const refreshToken = getRefreshToken();
     if (!refreshToken) return false;
 
-    const response = await fetch(`${API_URL}/api/auth/refresh`, {
+    const response = await fetch('/api/auth/refresh', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ refreshToken })
@@ -107,9 +101,7 @@ document.addEventListener('DOMContentLoaded', () => {
       headers.Authorization = `Bearer ${token}`;
     }
 
-    // Prepend API_URL to relative paths
-    const fullUrl = url.startsWith('http') ? url : `${API_URL}${url}`;
-    const response = await fetch(fullUrl, { ...options, headers });
+    const response = await fetch(url, { ...options, headers });
 
     if (response.status === 401 && retry) {
       let payload = null;
@@ -413,7 +405,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if (!badge) return;
     const data = await fetchSystemLoad();
     if (!data) { badge.textContent = '—'; return; }
-    const count = (data.alertes_total ?? data.alertes) || 0;
+    const count = data.alertes_total ?? data.alertes || 0;
     const dbkb = data.db_size_bytes ? Math.round(data.db_size_bytes / 1024) + 'KB' : '';
     badge.textContent = `${count} • ${dbkb}`;
   }
@@ -786,7 +778,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const demoBins = ['ESP-DEMO-01', 'ESP-DEMO-02', 'ESP-DEMO-03'];
     for (const esp32Id of demoBins) {
       try {
-        await fetch(`${API_URL}/api/iot/releve`, {
+        await fetch('/api/iot/releve', {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -1151,7 +1143,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   }
 
-  socket = io(API_URL, { transports: ['websocket', 'polling'] });
+  const socket = io();
 
   socket.on('connect', () => {
     console.log('📡 Connecté au serveur temps réel');
@@ -2205,9 +2197,8 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     const searchInput = document.getElementById('search-input');
-    if (searchInput) {
-      searchInput.addEventListener('input', (event) => {
-        const query = event.target.value.toLowerCase().trim();
+    searchInput.addEventListener('input', (event) => {
+      const query = event.target.value.toLowerCase().trim();
 
       if (!query) {
         Object.values(state.markers).forEach((record) => setMarkerVisible(record, true));
@@ -2228,8 +2219,6 @@ document.addEventListener('DOMContentLoaded', () => {
         firstMatch.openPopup();
       }
     });
-  }
-
   }
 
   async function init() {
@@ -2270,7 +2259,7 @@ document.addEventListener('DOMContentLoaded', () => {
         startRealTimePositionSimulation();
       }
     } catch (err) {
-      console.error(err.stack || err);
+      console.error(err);
       clearSession();
       if (window.location.pathname !== '/login') {
         window.location.href = '/login';

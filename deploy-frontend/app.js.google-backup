@@ -1,38 +1,28 @@
 // ═══════════════════════════════════════════════════════════════
 // SUIVI-DÉCHETS — Frontend App (Vanilla JS SPA)
 // ═══════════════════════════════════════════════════════════════
-// Détection auto environnement (localhost ou Render)
-const API_URL = window.location.hostname === 'localhost'
-  ? 'http://localhost:3000'
-  : 'https://suivi-dechets.onrender.com';
 
-// Socket will be initialized once below (after DOM ready)
-let socket = null;
 const bootToken = localStorage.getItem('accessToken');
 if (!bootToken && window.location.pathname !== '/login') {
   window.location.href = '/login';
 }
 
 document.addEventListener('DOMContentLoaded', () => {
-  const MAP_CENTER = [6.4486, 2.3553];
-  const MAP_MAX_BOUNDS = [[6.43, 2.33], [6.47, 2.38]];
+  const BENIN_CENTER = { lat: 6.4486, lng: 2.3553 };
   const LAND_BOUNDS = { latMin: 6.435, latMax: 6.465, lngMin: 2.335, lngMax: 2.375 };
-
-  const FAST_UAC = {
-    lat: 6.4405,
-    lng: 2.4168,
-    nom: 'FAST - Faculté des Sciences et Techniques',
-    batiments: [
-      { nom: 'Amphi 500', lat: 6.4402, lng: 2.4165 },
-      { nom: 'Laboratoire IoT', lat: 6.4408, lng: 2.4170 },
-      { nom: 'Bibliothèque FAST', lat: 6.4400, lng: 2.4162 },
-      { nom: 'Salle Hackathon', lat: 6.4405, lng: 2.4168 }
-    ]
+  const DEFAULT_BOUNDS = {
+    north: 6.47,
+    south: 6.43,
+    west: 2.33,
+    east: 2.38
   };
 
-  let demoModeActive = false;
-  let demoTimeouts = [];
-  let hackathonMapLayers = null;
+  function clampToLand(lat, lng) {
+    return {
+      lat: Math.max(LAND_BOUNDS.latMin, Math.min(LAND_BOUNDS.latMax, lat)),
+      lng: Math.max(LAND_BOUNDS.lngMin, Math.min(LAND_BOUNDS.lngMax, lng))
+    };
+  }
 
   const state = {
     activeTab: 'dashboard',
@@ -44,16 +34,20 @@ document.addEventListener('DOMContentLoaded', () => {
     currentUser: null,
     simulationActive: false,
     currentMapMode: null,
+    mapConfig: null,
     map: null,
     markers: {},
     markerCluster: null,
-    routeLayer: null,
-    quartiersChart: null,
-    currentLocation: null,
-    locationPermission: 'unknown'
+    trafficLayer: null,
+    directionsService: null,
+    directionsRenderer: null,
+    fallbackPolyline: null,
+    activeInfoWindow: null,
+    quartiersChart: null
   };
 
   let deferredPrompt = null;
+  let googleMapsPromise = null;
 
   function getAccessToken() {
     return localStorage.getItem('accessToken');
@@ -83,7 +77,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const refreshToken = getRefreshToken();
     if (!refreshToken) return false;
 
-    const response = await fetch(`${API_URL}/api/auth/refresh`, {
+    const response = await fetch('/api/auth/refresh', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ refreshToken })
@@ -107,9 +101,7 @@ document.addEventListener('DOMContentLoaded', () => {
       headers.Authorization = `Bearer ${token}`;
     }
 
-    // Prepend API_URL to relative paths
-    const fullUrl = url.startsWith('http') ? url : `${API_URL}${url}`;
-    const response = await fetch(fullUrl, { ...options, headers });
+    const response = await fetch(url, { ...options, headers });
 
     if (response.status === 401 && retry) {
       let payload = null;
@@ -142,8 +134,7 @@ document.addEventListener('DOMContentLoaded', () => {
     },
     async getPoubelles() {
       const res = await apiFetch('/api/poubelles');
-      const payload = await res.json();
-      return Array.isArray(payload) ? payload : (payload.data || []);
+      return res.json();
     },
     async getAlertes() {
       const res = await apiFetch('/api/alertes');
@@ -154,22 +145,10 @@ document.addEventListener('DOMContentLoaded', () => {
       return res.json();
     },
     async optimizeRoute(binIds) {
-      const payload = {
-        poubelle_ids: binIds,
-        collecteur: 'Equipe Elite'
-      };
-      if (state.currentLocation) {
-        payload.origin = {
-          latitude: state.currentLocation.latitude,
-          longitude: state.currentLocation.longitude,
-          label: 'Position actuelle',
-          quartier: 'Position actuelle'
-        };
-      }
       const res = await apiFetch('/api/tournees/optimiser', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
+        body: JSON.stringify({ poubelle_ids: binIds, collecteur: 'Equipe Elite' })
       });
       return res.json();
     },
@@ -290,182 +269,6 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
-  function updateLocationStatusUI() {
-    const badge = document.getElementById('location-status-badge');
-    if (!badge) return;
-    if (state.currentLocation) {
-      badge.textContent = '📍';
-      badge.classList.remove('hidden');
-      badge.title = 'Géolocalisation active';
-    } else if (state.locationPermission === 'denied') {
-      badge.textContent = '❌';
-      badge.classList.remove('hidden');
-      badge.title = 'Géolocalisation refusée';
-    } else {
-      badge.classList.add('hidden');
-    }
-  }
-
-  function updateRouteLocationHint() {
-    const hint = document.getElementById('route-location-hint');
-    if (!hint) return;
-    if (state.currentLocation) {
-      hint.innerHTML = `<div style="margin-bottom: 16px; padding: 12px 16px; border-radius: 14px; background: rgba(16, 185, 129, 0.1); border: 1px solid rgba(16, 185, 129, 0.25); color: #d1fae5; font-size: 13px;">
-        Itinéraire calculé à partir de votre position actuelle&nbsp;: ${state.currentLocation.latitude.toFixed(5)}, ${state.currentLocation.longitude.toFixed(5)}.
-      </div>`;
-    } else if (state.locationPermission === 'denied') {
-      hint.innerHTML = `<div style="margin-bottom: 16px; padding: 12px 16px; border-radius: 14px; background: rgba(239, 68, 68, 0.08); border: 1px solid rgba(239, 68, 68, 0.25); color: #fecaca; font-size: 13px;">
-        La géolocalisation a été refusée. L'itinéraire utilisera le dépôt par défaut.
-      </div>`;
-    } else {
-      hint.innerHTML = `<div style="margin-bottom: 16px; padding: 12px 16px; border-radius: 14px; background: rgba(59, 130, 246, 0.08); border: 1px solid rgba(59, 130, 246, 0.25); color: #bfdbfe; font-size: 13px;">
-        Recherche de votre position en temps réel... Autorisez la localisation pour démarrer l'itinéraire depuis votre emplacement.
-      </div>`;
-    }
-  }
-
-  function initGeolocationTracking() {
-    if (!('geolocation' in navigator)) {
-      state.locationPermission = 'unsupported';
-      updateLocationStatusUI();
-      return;
-    }
-
-    navigator.geolocation.getCurrentPosition(
-      (position) => {
-        state.currentLocation = {
-          latitude: position.coords.latitude,
-          longitude: position.coords.longitude
-        };
-        state.locationPermission = 'granted';
-        updateLocationStatusUI();
-      },
-      (error) => {
-        state.currentLocation = null;
-        state.locationPermission = error.code === error.PERMISSION_DENIED ? 'denied' : 'denied';
-        updateLocationStatusUI();
-      },
-      {
-        enableHighAccuracy: true,
-        timeout: 10000,
-        maximumAge: 10000
-      }
-    );
-
-    navigator.geolocation.watchPosition(
-      (position) => {
-        state.currentLocation = {
-          latitude: position.coords.latitude,
-          longitude: position.coords.longitude
-        };
-        state.locationPermission = 'granted';
-        if (state.activeTab === 'tournees') {
-          refreshActiveTabContent();
-        }
-        updateLocationStatusUI();
-        // update map marker for "Vous êtes ici"
-        if (typeof L !== 'undefined') updateYouAreHereMarker();
-      },
-      (error) => {
-        state.currentLocation = null;
-        state.locationPermission = error.code === error.PERMISSION_DENIED ? 'denied' : 'denied';
-        updateLocationStatusUI();
-      },
-      {
-        enableHighAccuracy: true,
-        maximumAge: 5000,
-        timeout: 15000
-      }
-    );
-  }
-
-  // --- Theme handling (persisted) ---
-  function applyTheme(theme) {
-    document.documentElement.classList.toggle('dark', theme === 'dark');
-    localStorage.setItem('theme', theme);
-  }
-
-  function toggleTheme() {
-    const current = localStorage.getItem('theme') || (document.documentElement.classList.contains('dark') ? 'dark' : 'light');
-    const next = current === 'dark' ? 'light' : 'dark';
-    applyTheme(next);
-  }
-
-  function initTheme() {
-    const saved = localStorage.getItem('theme');
-    if (saved) applyTheme(saved);
-    const btn = document.getElementById('theme-toggle-btn') || document.getElementById('theme-toggle');
-    if (btn) btn.addEventListener('click', () => toggleTheme());
-  }
-
-  // --- System load polling ---
-  let systemLoadTimer = null;
-  async function fetchSystemLoad() {
-    try {
-      const res = await apiFetch('/api/system/load');
-      if (!res.ok) return null;
-      return await res.json();
-    } catch (e) { return null; }
-  }
-
-  async function updateSystemLoadUI() {
-    const badge = document.getElementById('system-load-badge');
-    if (!badge) return;
-    const data = await fetchSystemLoad();
-    if (!data) { badge.textContent = '—'; return; }
-    const count = (data.alertes_total ?? data.alertes) || 0;
-    const dbkb = data.db_size_bytes ? Math.round(data.db_size_bytes / 1024) + 'KB' : '';
-    badge.textContent = `${count} • ${dbkb}`;
-  }
-
-  function initSystemLoadPolling(interval = 15000) {
-    updateSystemLoadUI();
-    if (systemLoadTimer) clearInterval(systemLoadTimer);
-    systemLoadTimer = setInterval(updateSystemLoadUI, interval);
-  }
-
-  // --- Filter chips for alerts/map ---
-  function initFilterChips() {
-    const container = document.getElementById('filter-chips');
-    if (!container) return;
-    container.addEventListener('click', (e) => {
-      const btn = e.target.closest('.chip');
-      if (!btn) return;
-      container.querySelectorAll('.chip').forEach((c) => c.classList.remove('active'));
-      btn.classList.add('active');
-      const filter = btn.dataset.filter;
-      applyFilter(filter);
-    });
-  }
-
-  function applyFilter(filter) {
-    // simple example: show/hide markers by alert presence or resolved flag
-    Object.values(state.markers).forEach((rec) => {
-      let visible = true;
-      if (filter === 'signalement') {
-        visible = Number(rec.bin.niveau || 0) >= 50;
-      } else if (filter === 'resolved') {
-        visible = Number(rec.bin.niveau || 0) < 50;
-      }
-      setMarkerVisible(rec, visible);
-    });
-  }
-
-  // --- "Vous êtes ici" marker management ---
-  let youMarker = null;
-  function updateYouAreHereMarker() {
-    if (!state.map || !state.currentLocation) return;
-    try {
-      const ll = [state.currentLocation.latitude, state.currentLocation.longitude];
-      if (!youMarker) {
-        youMarker = L.circleMarker(ll, { radius: 8, color: '#5b9eff', fillColor: '#5b9eff', fillOpacity: 0.95, weight: 2 }).addTo(state.map);
-        youMarker.bindTooltip('Vous êtes ici', { permanent: false, direction: 'top' });
-      } else {
-        youMarker.setLatLng(ll);
-      }
-    } catch (e) { /* ignore leaflet errors if map not ready */ }
-  }
-
   function formatTimestamp(value) {
     if (!value) return '--';
     const date = new Date(value);
@@ -483,91 +286,46 @@ document.addEventListener('DOMContentLoaded', () => {
     return Boolean(bin?.quartier && String(bin.quartier).startsWith('UAC'));
   }
 
-  function createUACMarker(bin) {
-    const color = getMarkerColor(bin?.niveau || 0);
-    return L.divIcon({
-      html: `
-        <div class="uac-marker-pin" style="--uac-color:${color}">
-          <div class="uac-marker-inner">🎓</div>
-        </div>
-      `,
-      className: 'uac-marker',
-      iconSize: [44, 44],
-      iconAnchor: [22, 44],
-      popupAnchor: [0, -40]
-    });
-  }
-
-  function createLeafletIcon(level, bin = null) {
-    if (bin && isUACBin(bin)) {
-      return createUACMarker(bin);
-    }
+  function createMarkerIcon(level, bin = null) {
     const color = getMarkerColor(level);
-    const size = 28;
-    return L.divIcon({
-      className: 'leaflet-marker-custom',
-      html: `<div class="map-marker map-marker--pin" style="--marker-color:${color}"></div>`,
-      iconSize: [size, size],
-      iconAnchor: [size / 2, size / 2],
-      popupAnchor: [0, -size / 2]
-    });
-  }
 
-  function addHackathonOverlay(map) {
-    if (!map || typeof L === 'undefined') return;
-
-    if (hackathonMapLayers) {
-      hackathonMapLayers.forEach((layer) => {
-        try { map.removeLayer(layer); } catch (e) { /* ignore */ }
-      });
+    if (bin && isUACBin(bin) && window.google?.maps?.SymbolPath) {
+      return {
+        path: 'M12 2L15 8.5L22 9.5L17 14L18.5 21L12 17.5L5.5 21L7 14L2 9.5L9 8.5L12 2Z',
+        fillColor: color,
+        fillOpacity: 1,
+        strokeColor: '#ffffff',
+        strokeWeight: 2,
+        scale: 1.8,
+        anchor: new google.maps.Point(12, 12)
+      };
     }
-    hackathonMapLayers = [];
 
-    const bannerIcon = L.divIcon({
-      html: `<div class="hackathon-banner">🚀 HACKATHON FAST 2026</div>`,
-      className: 'hackathon-banner-wrap',
-      iconSize: [220, 44],
-      iconAnchor: [110, 22]
-    });
-    hackathonMapLayers.push(L.marker([FAST_UAC.lat, FAST_UAC.lng], { icon: bannerIcon, zIndexOffset: 1000 }).addTo(map));
+    const svg = `
+      <svg xmlns="http://www.w3.org/2000/svg" width="54" height="64" viewBox="0 0 54 64">
+        <defs>
+          <filter id="shadow" x="-20%" y="-20%" width="160%" height="180%">
+            <feDropShadow dx="0" dy="8" stdDeviation="4" flood-color="rgba(15,23,42,0.32)"/>
+          </filter>
+          <linearGradient id="pin" x1="0%" y1="0%" x2="0%" y2="100%">
+            <stop offset="0%" stop-color="${color}"/>
+            <stop offset="100%" stop-color="${color}"/>
+          </linearGradient>
+        </defs>
+        <ellipse cx="27" cy="57" rx="12" ry="5" fill="rgba(15,23,42,0.16)"/>
+        <g filter="url(#shadow)">
+          <path d="M27 4c-10.493 0-19 8.507-19 19 0 14.25 19 34 19 34s19-19.75 19-34c0-10.493-8.507-19-19-19z" fill="url(#pin)"/>
+          <circle cx="27" cy="23" r="9" fill="#ffffff"/>
+          <circle cx="27" cy="23" r="4" fill="${color}" fill-opacity="0.25"/>
+        </g>
+      </svg>
+    `;
 
-    FAST_UAC.batiments.forEach((b) => {
-      hackathonMapLayers.push(
-        L.circleMarker([b.lat, b.lng], {
-          radius: 8,
-          color: '#8b5cf6',
-          fillColor: '#8b5cf6',
-          fillOpacity: 0.35,
-          weight: 2
-        }).addTo(map)
-      );
-      hackathonMapLayers.push(
-        L.marker([b.lat, b.lng], {
-          icon: L.divIcon({
-            className: 'fast-building-label',
-            html: `<span>${b.nom}</span>`,
-            iconSize: [0, 0]
-          })
-        }).addTo(map)
-      );
-    });
-  }
-
-  function ensureLeaflet() {
-    if (typeof L === 'undefined') {
-      throw new Error('Leaflet non chargé — vérifiez votre connexion');
-    }
-    return L;
-  }
-
-  function haversineKm(lat1, lon1, lat2, lon2) {
-    const R = 6371;
-    const dLat = (lat2 - lat1) * Math.PI / 180;
-    const dLon = (lon2 - lon1) * Math.PI / 180;
-    const a = Math.sin(dLat / 2) ** 2 +
-      Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
-      Math.sin(dLon / 2) ** 2;
-    return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    return {
+      url: `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(svg)}`,
+      scaledSize: new google.maps.Size(40, 48),
+      anchor: new google.maps.Point(20, 44)
+    };
   }
 
   function buildInfoWindowContent(bin) {
@@ -594,339 +352,276 @@ document.addEventListener('DOMContentLoaded', () => {
           <div class="bin-popup__stat"><span>Signal:</span><span>${bin.signal_force ?? '--'}%</span></div>
           <div class="bin-popup__stat"><span>Maj:</span><span>${formatTimestamp(bin.dernier_releve)}</span></div>
         </div>
+        <div class="bin-popup__cta">Cliquez pour ouvrir Street View</div>
       </div>
     `;
   }
 
+  async function loadGoogleMaps() {
+    if (window.google?.maps) {
+      return window.google.maps;
+    }
+
+    if (googleMapsPromise) {
+      return googleMapsPromise;
+    }
+
+    googleMapsPromise = new Promise(async (resolve, reject) => {
+      try {
+        const config = await API.getMapsConfig();
+        if (config.error || !config.apiKey) {
+          reject(new Error(config.error || 'Configuration Google Maps indisponible'));
+          return;
+        }
+
+        state.mapConfig = config;
+        const timeoutMs = 12000;
+        const timeoutId = setTimeout(() => {
+          try {
+            delete window.__suiviMapsReady;
+          } catch (e) {
+            // no-op
+          }
+          reject(new Error('Google Maps chargement timeout'));
+        }, timeoutMs);
+
+        window.__suiviMapsReady = () => {
+          clearTimeout(timeoutId);
+          try {
+            delete window.__suiviMapsReady;
+          } catch (e) {
+            // no-op
+          }
+          if (window.google?.maps) {
+            resolve(window.google.maps);
+          } else {
+            reject(new Error('Google Maps chargée mais google.maps est indisponible'));
+          }
+        };
+
+        const script = document.createElement('script');
+        script.src = `https://maps.googleapis.com/maps/api/js?key=${encodeURIComponent(config.apiKey)}&libraries=geometry,places&v=weekly&callback=__suiviMapsReady`;
+        script.async = true;
+        script.defer = true;
+        script.onerror = () => {
+          clearTimeout(timeoutId);
+          reject(new Error('Impossible de charger Google Maps'));
+        };
+        document.head.appendChild(script);
+      } catch (error) {
+        reject(error);
+      }
+    });
+
+    return googleMapsPromise;
+  }
+
   function clearMapState() {
-    if (state.markerCluster && state.map) {
-      state.map.removeLayer(state.markerCluster);
+    if (state.markerCluster?.clearMarkers) {
+      state.markerCluster.clearMarkers();
     }
     state.markerCluster = null;
 
     Object.values(state.markers).forEach((entry) => {
-      if (entry?.marker && state.map) {
-        if (state.markerCluster) {
-          state.markerCluster.removeLayer(entry.marker);
-        } else {
-          state.map.removeLayer(entry.marker);
-        }
+      if (entry?.marker) {
+        entry.marker.setMap(null);
       }
     });
     state.markers = {};
 
-    if (state.routeLayer && state.map) {
-      state.map.removeLayer(state.routeLayer);
-      state.routeLayer = null;
+    if (state.directionsRenderer) {
+      state.directionsRenderer.setMap(null);
+      state.directionsRenderer = null;
     }
 
-    if (state.map) {
-      state.map.remove();
-      state.map = null;
+    if (state.fallbackPolyline) {
+      state.fallbackPolyline.setMap(null);
+      state.fallbackPolyline = null;
     }
+
+    state.directionsService = null;
+    state.trafficLayer = null;
+    state.activeInfoWindow = null;
+    state.map = null;
   }
 
-  async function initMap(containerId, options = {}) {
-    ensureLeaflet();
+  async function initGoogleMap(containerId, options = {}) {
+    await loadGoogleMaps();
+
     clearMapState();
 
     const container = document.getElementById(containerId);
-    if (!container) return null;
-
-    if (!container.style.minHeight) {
-      container.style.minHeight = options.minHeight || '360px';
+    if (!container) {
+      return null;
     }
 
-    state.map = L.map(container, {
-      center: MAP_CENTER,
-      zoom: options.zoom || 14,
-      maxBounds: MAP_MAX_BOUNDS,
-      maxBoundsViscosity: 0.85,
-      zoomControl: true
-    });
+    const center = state.mapConfig?.center || BENIN_CENTER;
+    const bounds = state.mapConfig?.bounds || DEFAULT_BOUNDS;
 
-    L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
-      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OSM</a> &copy; CARTO',
-      subdomains: 'abcd',
-      maxZoom: 19
-    }).addTo(state.map);
+    const mapOptions = {
+      center,
+      zoom: options.zoom || 12,
+      disableDefaultUI: false,
+      zoomControl: true,
+      mapTypeControl: true,
+      fullscreenControl: true,
+      streetViewControl: true,
+      restriction: {
+        latLngBounds: bounds,
+        strictBounds: false
+      },
+      clickableIcons: false,
+      styles: [
+        {
+          featureType: 'poi',
+          elementType: 'labels',
+          stylers: [{ visibility: 'off' }]
+        }
+      ]
+    };
 
-    L.control.scale({
-      metric: true,
-      imperial: false,
-      position: 'bottomleft',
-      updateWhenIdle: true
-    }).addTo(state.map);
-
-    const MiniMapControl = L.Control.extend({
-      options: { position: 'bottomright' },
-      onAdd() {
-        const containerEl = L.DomUtil.create('div', 'minimap-control');
-        containerEl.style.width = '150px';
-        containerEl.style.height = '150px';
-        containerEl.style.borderRadius = '12px';
-        containerEl.style.border = '1px solid rgba(91, 158, 255, 0.45)';
-        containerEl.style.overflow = 'hidden';
-        containerEl.style.boxShadow = '0 12px 26px rgba(0,0,0,0.35)';
-        L.DomEvent.disableClickPropagation(containerEl);
-
-        const miniMap = L.map(containerEl, {
-          attributionControl: false,
-          zoomControl: false,
-          dragging: false,
-          scrollWheelZoom: false,
-          doubleClickZoom: false,
-          boxZoom: false,
-          keyboard: false,
-          tap: false
-        }).setView(MAP_CENTER, 12);
-
-        L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
-          subdomains: 'abcd',
-          maxZoom: 19
-        }).addTo(miniMap);
-        L.circleMarker(MAP_CENTER, { radius: 6, color: '#5b9eff', fillColor: '#5b9eff', fillOpacity: 0.9 }).addTo(miniMap);
-        return containerEl;
-      }
-    });
-    state.map.addControl(new MiniMapControl());
-
-    if (options.hackathonOverlay !== false) {
-      addHackathonOverlay(state.map);
+    // Certains problèmes (mapId invalide / config Google) peuvent empêcher l'instanciation du map.
+    // On retente sans mapId si nécessaire.
+    try {
+      mapOptions.mapId = state.mapConfig?.mapId || 'SUIVI_DECHETS_MAP';
+      state.map = new google.maps.Map(container, mapOptions);
+    } catch (e) {
+      console.warn('Google Maps: instanciation échouée (mapId). Re-tentative sans mapId.', e);
+      delete mapOptions.mapId;
+      state.map = new google.maps.Map(container, mapOptions);
     }
 
     state.currentMapMode = options.mode || 'dashboard';
+    addTrafficLayer();
 
-    if (options.showAllBins !== false) {
-      addBinMarkers(state.poubelles, { cluster: options.cluster !== false });
+    if (options.enableDirections) {
+      state.directionsService = new google.maps.DirectionsService();
+      state.directionsRenderer = new google.maps.DirectionsRenderer({
+        suppressMarkers: true,
+        preserveViewport: false,
+        polylineOptions: {
+          strokeColor: '#10b981',
+          strokeOpacity: 0.92,
+          strokeWeight: 6
+        }
+      });
+      state.directionsRenderer.setMap(state.map);
     }
 
-    setTimeout(() => state.map?.invalidateSize(), 150);
+    if (options.showAllBins !== false) {
+      addBinMarkers(state.poubelles, {
+        cluster: options.cluster !== false
+      });
+    }
+
     return state.map;
   }
 
-  async function renderHackathonStats() {
-    let data = state.stats;
-    try {
-      const res = await apiFetch('/api/admin/stats');
-      if (res.ok) data = await res.json();
-    } catch (e) {
-      console.warn('Hackathon stats fallback', e);
-    }
-
-    const container = document.getElementById('hackathon-stats');
-    if (!container) return;
-
-    const co2 = data.co2_saved ?? 148;
-    const esp32 = data.esp32_online ?? 0;
-    const total = data.total_bins ?? data.total_poubelles ?? state.poubelles?.length ?? 0;
-    const uac = data.uac_bins ?? state.poubelles?.filter((b) => isUACBin(b)).length ?? 4;
-
-    container.innerHTML = `
-      <div class="stats-showcase">
-        <div class="stat-premium">
-          <div class="stat-premium__icon">🏫</div>
-          <div class="stat-premium__value">${total}</div>
-          <div class="stat-premium__label">Poubelles connectées</div>
-          <div class="stat-premium__sub">Abomey-Calavi & Cotonou · ${uac} sur campus UAC</div>
-        </div>
-        <div class="stat-premium">
-          <div class="stat-premium__icon">📡</div>
-          <div class="stat-premium__value">${esp32}</div>
-          <div class="stat-premium__label">ESP32 actifs</div>
-          <div class="stat-premium__sub">données en temps réel</div>
-        </div>
-        <div class="stat-premium">
-          <div class="stat-premium__icon">🚛</div>
-          <div class="stat-premium__value">${co2}</div>
-          <div class="stat-premium__label">kg CO₂ économisés</div>
-          <div class="stat-premium__sub">optimisation TSP des tournées</div>
-        </div>
-        <div class="stat-premium">
-          <div class="stat-premium__icon">⚡</div>
-          <div class="stat-premium__value">&lt; 100ms</div>
-          <div class="stat-premium__label">Temps de réponse API</div>
-          <div class="stat-premium__sub">temps réel WebSocket</div>
-        </div>
-      </div>
-    `;
+  function addTrafficLayer() {
+    if (!state.map || !window.google?.maps) return;
+    state.trafficLayer = new google.maps.TrafficLayer();
+    state.trafficLayer.setMap(state.map);
   }
 
-  function clearDemoTimers() {
-    demoTimeouts.forEach((id) => clearTimeout(id));
-    demoTimeouts = [];
-  }
-
-  function highlightMapDemo() {
-    if (!state.map) return;
-    state.map.flyTo(MAP_CENTER, 11, { duration: 1.2 });
-    setTimeout(() => {
-      if (state.map) state.map.flyTo([FAST_UAC.lat, FAST_UAC.lng], 16, { duration: 1.8 });
-    }, 2000);
-  }
-
-  function highlightUACDemo() {
-    if (!state.map || typeof L === 'undefined') return;
-    state.map.flyTo([FAST_UAC.lat, FAST_UAC.lng], 17, { duration: 1.5 });
-    const pulse = L.marker([FAST_UAC.lat, FAST_UAC.lng], {
-      icon: L.divIcon({
-        html: '<div class="demo-flash-marker">🎓 FAST UAC</div>',
-        className: 'demo-flash-wrap',
-        iconSize: [120, 40],
-        iconAnchor: [60, 40]
-      })
-    }).addTo(state.map);
-    setTimeout(() => {
-      try { state.map.removeLayer(pulse); } catch (e) { /* ignore */ }
-    }, 3200);
-  }
-
-  async function simulateESP32Bulk() {
-    const token = localStorage.getItem('accessToken');
-    const demoBins = ['ESP-DEMO-01', 'ESP-DEMO-02', 'ESP-DEMO-03'];
-    for (const esp32Id of demoBins) {
-      try {
-        await fetch(`${API_URL}/api/iot/releve`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'x-esp32-token': 'shared-secret-key-2026'
-          },
-          body: JSON.stringify({
-            esp32_id: esp32Id,
-            niveau: Math.round(55 + Math.random() * 40),
-            temperature: Number((26 + Math.random() * 10).toFixed(1)),
-            batterie: Math.round(50 + Math.random() * 45),
-            signal: Math.round(-70 + Math.random() * 20),
-            distance: Math.round(30 + Math.random() * 120),
-            poids: Number((2 + Math.random() * 12).toFixed(1))
-          })
-        });
-      } catch (e) {
-        console.warn('Demo ESP32 simulate failed', esp32Id, e);
-      }
-    }
-    showToast('📡 Simulation ESP32 — envoi de relevés en direct', 'info');
-  }
-
-  function startDemoMode() {
-    if (demoModeActive) return;
-    demoModeActive = true;
-
-    let overlay = document.querySelector('.demo-mode');
-    if (!overlay) {
-      overlay = document.createElement('div');
-      overlay.className = 'demo-mode';
-      overlay.innerHTML = `
-        <div class="demo-badge">
-          🎓 DÉMONSTRATION — FAST UAC HACKATHON 2026
-        </div>
-      `;
-      document.body.appendChild(overlay);
-    }
-
-    const steps = [
-      { delay: 0, action: () => showToast('Bienvenue à la démo SUIVI-DÉCHETS', 'info') },
-      { delay: 2000, action: () => showToast('📊 Réseau connecté — Abomey-Calavi & Cotonou', 'success') },
-      { delay: 5000, action: () => highlightMapDemo() },
-      { delay: 8000, action: () => showToast('🗺️ Clustering intelligent — visualisation fluide du réseau', 'info') },
-      { delay: 12000, action: () => simulateESP32Bulk() },
-      { delay: 15000, action: () => showToast('📡 ESP32 — relevés toutes les 60 secondes', 'success') },
-      { delay: 20000, action: () => highlightUACDemo() },
-      { delay: 25000, action: () => showToast('🎓 Solution développée à la FAST UAC', 'success') }
-    ];
-
-    steps.forEach((step) => {
-      const id = setTimeout(step.action, step.delay);
-      demoTimeouts.push(id);
-    });
+  function addStreetView(marker) {
+    if (!state.map || !marker?.getPosition) return;
+    const streetView = state.map.getStreetView();
+    streetView.setPosition(marker.getPosition());
+    streetView.setPov({ heading: 0, pitch: 0 });
+    streetView.setVisible(true);
   }
 
   function addBinMarkers(bins = state.poubelles, options = {}) {
-    if (!state.map || typeof L === 'undefined') return;
+    if (!state.map || !window.google?.maps) return;
 
-    const clusterEnabled = options.cluster !== false && typeof L.markerClusterGroup !== 'undefined';
+    const clusterEnabled = options.cluster !== false;
+    const bounds = new google.maps.LatLngBounds();
+    const markerInstances = [];
 
-    if (state.markerCluster) {
-      state.map.removeLayer(state.markerCluster);
-      state.markerCluster = null;
+    if (state.markerCluster?.clearMarkers) {
+      state.markerCluster.clearMarkers();
     }
-
     Object.values(state.markers).forEach((entry) => {
-      if (entry?.marker) {
-        if (state.markerCluster) state.markerCluster.removeLayer(entry.marker);
-        else state.map.removeLayer(entry.marker);
-      }
+      if (entry?.marker) entry.marker.setMap(null);
     });
     state.markers = {};
 
-    const latlngs = [];
-    const markerList = [];
-
     bins.forEach((bin) => {
-      const lat = Number(bin.latitude);
-      const lng = Number(bin.longitude);
-      if (!Number.isFinite(lat) || !Number.isFinite(lng)) return;
-
       const level = Number(bin.niveau || 0);
-      const marker = L.marker([lat, lng], {
-        icon: createLeafletIcon(level, bin),
-        title: bin.nom
+      const position = { lat: Number(bin.latitude), lng: Number(bin.longitude) };
+      const marker = new google.maps.Marker({
+        position,
+        map: state.map,
+        title: bin.nom,
+        icon: createMarkerIcon(level, bin),
+        animation: level >= 80 ? google.maps.Animation.BOUNCE : null,
+        optimized: true
       });
-      marker.bindPopup(buildInfoWindowContent(bin), { maxWidth: 300 });
 
-      const record = { marker, bin, visible: true };
+      if (level >= 80) {
+        setTimeout(() => marker.setAnimation(null), 2400);
+      }
+
+      const infoWindow = new google.maps.InfoWindow({
+        content: buildInfoWindowContent(bin)
+      });
+
+      const record = { marker, infoWindow, bin };
+      marker.addListener('click', () => {
+        if (state.activeInfoWindow) {
+          state.activeInfoWindow.close();
+        }
+        infoWindow.setContent(buildInfoWindowContent(record.bin));
+        infoWindow.open({ anchor: marker, map: state.map });
+        state.activeInfoWindow = infoWindow;
+        addStreetView(marker);
+      });
+
       state.markers[bin.id] = record;
-      markerList.push(marker);
-      latlngs.push([lat, lng]);
+      markerInstances.push(marker);
+      bounds.extend(position);
     });
 
-    if (clusterEnabled && markerList.length > 1) {
-      state.markerCluster = L.markerClusterGroup({
-        showCoverageOnHover: false,
-        maxClusterRadius: 50
+    if (clusterEnabled && window.markerClusterer?.MarkerClusterer && markerInstances.length > 1) {
+      state.markerCluster = new window.markerClusterer.MarkerClusterer({
+        map: state.map,
+        markers: markerInstances
       });
-      markerList.forEach((m) => state.markerCluster.addLayer(m));
-      state.map.addLayer(state.markerCluster);
-    } else {
-      markerList.forEach((m) => m.addTo(state.map));
     }
 
-    if (latlngs.length > 1 && state.currentMapMode !== 'route') {
-      state.map.fitBounds(latlngs, { padding: [48, 48] });
-    } else if (latlngs.length === 1) {
-      state.map.setView(latlngs[0], 15);
-    }
-  }
-
-  function setMarkerVisible(record, visible) {
-    if (!record?.marker || !state.map) return;
-    if (visible === record.visible) return;
-    record.visible = visible;
-    if (state.markerCluster) {
-      if (visible) state.markerCluster.addLayer(record.marker);
-      else state.markerCluster.removeLayer(record.marker);
-    } else if (visible) {
-      record.marker.addTo(state.map);
-    } else {
-      state.map.removeLayer(record.marker);
+    if (!bounds.isEmpty() && bins.length > 1 && state.currentMapMode !== 'route') {
+      state.map.fitBounds(bounds, 60);
+    } else if (bins.length === 1) {
+      state.map.setCenter(bounds.getCenter());
+      state.map.setZoom(15);
     }
   }
 
   function updateMarker(bin) {
     const record = state.markers[bin.id];
-    if (!record || !state.map) return;
+    if (!record || !state.map || !window.google?.maps) return;
 
     const merged = { ...record.bin, ...bin };
     const level = Number(merged.niveau || 0);
     record.bin = merged;
-    record.marker.setLatLng([Number(merged.latitude), Number(merged.longitude)]);
-    record.marker.setIcon(createLeafletIcon(level, merged));
-    record.marker.setPopupContent(buildInfoWindowContent(merged));
+    record.marker.setPosition({
+      lat: Number(merged.latitude),
+      lng: Number(merged.longitude)
+    });
+    record.marker.setIcon(createMarkerIcon(level, merged));
+    record.marker.setAnimation(level >= 80 ? google.maps.Animation.BOUNCE : null);
+    if (level >= 80) {
+      setTimeout(() => record.marker.setAnimation(null), 2400);
+    }
+    if (state.activeInfoWindow === record.infoWindow) {
+      record.infoWindow.setContent(buildInfoWindowContent(merged));
+    }
   }
 
   async function calculateRoute(routeBins) {
-    if (!state.map || !routeBins?.length) return null;
+    if (!state.map || !state.directionsService || !state.directionsRenderer || !routeBins?.length) {
+      return null;
+    }
 
     const routePoints = routeBins.map((bin) => ({
       ...bin,
@@ -934,48 +629,95 @@ document.addEventListener('DOMContentLoaded', () => {
       longitude: Number(bin.longitude)
     }));
 
-    if (routePoints.length < 2) return null;
-
-    if (state.routeLayer) {
-      state.map.removeLayer(state.routeLayer);
-      state.routeLayer = null;
+    if (routePoints.length < 2) {
+      return null;
     }
 
-    const latlngs = routePoints.map((p) => [p.latitude, p.longitude]);
-    latlngs.push([routePoints[0].latitude, routePoints[0].longitude]);
-
-    state.routeLayer = L.polyline(latlngs, {
-      color: '#10b981',
-      weight: 5,
-      opacity: 0.92,
-      lineJoin: 'round'
-    }).addTo(state.map);
-
-    state.map.fitBounds(state.routeLayer.getBounds(), { padding: [40, 40] });
-    addBinMarkers(routePoints, { cluster: false });
-
-    let distanceKm = 0;
-    for (let i = 0; i < routePoints.length - 1; i++) {
-      distanceKm += haversineKm(
-        routePoints[i].latitude, routePoints[i].longitude,
-        routePoints[i + 1].latitude, routePoints[i + 1].longitude
-      );
-    }
-    distanceKm += haversineKm(
-      routePoints[routePoints.length - 1].latitude,
-      routePoints[routePoints.length - 1].longitude,
-      routePoints[0].latitude,
-      routePoints[0].longitude
-    );
-    distanceKm = Math.round(distanceKm * 100) / 100;
-    const durationMin = Math.max(1, Math.round((distanceKm / 22) * 60));
-
-    return {
-      isFallback: false,
-      orderedStops: routePoints,
-      distanceKm,
-      durationMin
+    const origin = {
+      lat: routePoints[0].latitude,
+      lng: routePoints[0].longitude
     };
+    const destination = {
+      lat: routePoints[routePoints.length - 1].latitude,
+      lng: routePoints[routePoints.length - 1].longitude
+    };
+    const waypoints = routePoints.slice(1, -1).map((bin) => ({
+      location: {
+        lat: bin.latitude,
+        lng: bin.longitude
+      },
+      stopover: true
+    }));
+
+    try {
+      const result = await state.directionsService.route({
+        origin,
+        destination,
+        waypoints,
+        optimizeWaypoints: true,
+        travelMode: google.maps.TravelMode.DRIVING,
+        unitSystem: google.maps.UnitSystem.METRIC,
+        drivingOptions: {
+          departureTime: new Date(),
+          trafficModel: google.maps.TrafficModel.BEST_GUESS
+        }
+      });
+
+      if (state.fallbackPolyline) {
+        state.fallbackPolyline.setMap(null);
+        state.fallbackPolyline = null;
+      }
+
+      state.directionsRenderer.setDirections(result);
+
+      const order = [routePoints[0], ...result.routes[0].waypoint_order.map((index) => routePoints[index + 1]), routePoints[routePoints.length - 1]];
+      const totals = result.routes[0].legs.reduce((acc, leg) => {
+        acc.distanceMeters += leg.distance?.value || 0;
+        acc.durationSeconds += leg.duration?.value || 0;
+        return acc;
+      }, { distanceMeters: 0, durationSeconds: 0 });
+
+      addBinMarkers(order, { cluster: false });
+
+      return {
+        raw: result,
+        orderedStops: order,
+        distanceKm: Math.round((totals.distanceMeters / 1000) * 100) / 100,
+        durationMin: Math.round(totals.durationSeconds / 60)
+      };
+    } catch (error) {
+      console.warn("Directions API failed, using geodesic route fallback", error);
+      showToast("Directions API indisponible. Trajet à vol d'oiseau.", "warning");
+
+      if (state.fallbackPolyline) {
+        state.fallbackPolyline.setMap(null);
+      }
+
+      const pathCoordinates = routePoints.map(p => ({ lat: p.latitude, lng: p.longitude }));
+      pathCoordinates.push({ lat: routePoints[0].latitude, lng: routePoints[0].longitude });
+
+      state.fallbackPolyline = new google.maps.Polyline({
+        path: pathCoordinates,
+        geodesic: true,
+        strokeColor: '#f59e0b',
+        strokeOpacity: 0.8,
+        strokeWeight: 4,
+        map: state.map
+      });
+
+      addBinMarkers(routePoints, { cluster: false });
+
+      const bounds = new google.maps.LatLngBounds();
+      pathCoordinates.forEach(coord => bounds.extend(coord));
+      state.map.fitBounds(bounds, 60);
+
+      return {
+        isFallback: true,
+        orderedStops: routePoints,
+        distanceKm: null,
+        durationMin: null
+      };
+    }
   }
 
   async function exportRoutePdf(routeData = state.currentRoute, options = {}) {
@@ -1127,10 +869,14 @@ document.addEventListener('DOMContentLoaded', () => {
       for (let i = 0; i < numToMove && poubelles.length > 0; i++) {
         const randomIndex = Math.floor(Math.random() * poubelles.length);
         const bin = poubelles[randomIndex];
-        const deltaLat = (Math.random() - 0.5) * 0.01;
-        const deltaLng = (Math.random() - 0.5) * 0.01;
-        const newLat = Math.max(LAND_BOUNDS.latMin, Math.min(LAND_BOUNDS.latMax, Number(bin.latitude) + deltaLat));
-        const newLng = Math.max(LAND_BOUNDS.lngMin, Math.min(LAND_BOUNDS.lngMax, Number(bin.longitude) + deltaLng));
+        const deltaLat = (Math.random() - 0.5) * 0.002;
+        const deltaLng = (Math.random() - 0.5) * 0.002;
+        const clamped = clampToLand(
+          Number(bin.latitude) + deltaLat,
+          Number(bin.longitude) + deltaLng
+        );
+        const newLat = clamped.lat;
+        const newLng = clamped.lng;
         await updateBinPosition(bin.id, newLat, newLng);
       }
 
@@ -1151,7 +897,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   }
 
-  socket = io(API_URL, { transports: ['websocket', 'polling'] });
+  const socket = io();
 
   socket.on('connect', () => {
     console.log('📡 Connecté au serveur temps réel');
@@ -1286,8 +1032,6 @@ document.addEventListener('DOMContentLoaded', () => {
         <div class="content__loading"><div class="spinner"></div></div>
       </div>
 
-      <div id="hackathon-stats" class="hackathon-stats animate-slide-up"></div>
-
       <div class="dashboard-grid">
         <div class="card animate-slide-up">
           <div class="card__header">
@@ -1329,10 +1073,9 @@ document.addEventListener('DOMContentLoaded', () => {
       const stats = await API.getStats();
       state.stats = stats;
       updateDashboardStats(state.stats);
-      await renderHackathonStats();
       renderDashboardAlerts();
       renderDashboardPerformance(state.stats);
-      await initMap('dashboard-map', { mode: 'dashboard', cluster: true, minHeight: '380px' });
+      await initGoogleMap('dashboard-map', { mode: 'dashboard', cluster: true });
     } catch (err) {
       console.error(err);
       showToast('Erreur de chargement du dashboard cartographique', 'error');
@@ -1481,8 +1224,8 @@ document.addEventListener('DOMContentLoaded', () => {
     const content = document.getElementById('page-content');
     content.innerHTML = `
       <div class="page-title animate-fade">
-        <h1>Carte Interactive Leaflet</h1>
-        <p>Vue temps réel sur Abomey-Calavi — réseau de poubelles connectées</p>
+        <h1>Carte Interactive Google Maps</h1>
+        <p>Vue premium temps réel sur Abomey-Calavi, Cotonou et Porto-Novo</p>
       </div>
 
       <div class="card animate-slide-up" style="height: calc(100vh - 180px);">
@@ -1493,10 +1236,11 @@ document.addEventListener('DOMContentLoaded', () => {
     `;
 
     try {
-      await initMap('full-map', { mode: 'carte', cluster: true, minHeight: 'calc(100vh - 200px)' });
+      await initGoogleMap('full-map', { mode: 'carte', cluster: true });
     } catch (err) {
       console.error(err);
-      showToast('Carte indisponible', 'error');
+      const msg = err?.message ? String(err.message) : 'Google Maps indisponible pour la vue carte';
+      showToast(msg, 'error');
     }
   }
 
@@ -1507,7 +1251,7 @@ document.addEventListener('DOMContentLoaded', () => {
     content.innerHTML = `
       <div class="page-title animate-fade">
         <h1>Optimisation de Tournée</h1>
-        <p>Optimisation TSP + tracé Leaflet sur le réseau</p>
+        <p>Itinéraires premium en mode DRIVING avec trafic temps réel</p>
       </div>
 
       <div class="dashboard-grid animate-slide-up">
@@ -1520,7 +1264,6 @@ document.addEventListener('DOMContentLoaded', () => {
             <button class="btn btn--primary btn--sm" id="btn-select-all">Sélectionner tout</button>
           </div>
           <div class="card__body">
-            <div id="route-location-hint" class="route-location-hint"></div>
             <div class="tournee-grid" id="tournee-select-grid">
               ${binsToCollect.length === 0 ? `
                 <div style="grid-column: 1/-1; text-align: center; padding: 40px; color: var(--text-muted);">
@@ -1550,7 +1293,7 @@ document.addEventListener('DOMContentLoaded', () => {
           <div class="card" id="route-result-container">
             <div style="padding: 40px; text-align: center; color: var(--text-muted);">
               <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-bottom: 12px; opacity: 0.4;"><polygon points="12 2 2 7 12 12 22 7 12 2"/><polyline points="2 17 12 22 22 17"/><polyline points="2 12 12 17 22 12"/></svg>
-              <p>Sélectionnez au moins 2 points pour calculer un itinéraire optimisé.</p>
+              <p>Sélectionnez au moins 2 points pour calculer un trajet DRIVING Google Maps.</p>
             </div>
           </div>
 
@@ -1562,17 +1305,17 @@ document.addEventListener('DOMContentLoaded', () => {
     `;
 
     try {
-      await initMap('route-map', {
+      await initGoogleMap('route-map', {
         mode: 'route',
         cluster: false,
+        enableDirections: true,
         showAllBins: false,
-        zoom: 14,
-        minHeight: '320px'
+        zoom: 11
       });
       addBinMarkers(binsToCollect, { cluster: false });
     } catch (err) {
       console.error(err);
-      showToast('Carte indisponible pour les tournées', 'error');
+      showToast('Google Maps indisponible pour les tournées', 'error');
     }
 
     const checkboxes = content.querySelectorAll('.tournee-checkbox');
@@ -1619,14 +1362,12 @@ document.addEventListener('DOMContentLoaded', () => {
       });
     }
 
-    updateRouteLocationHint();
-
     document.getElementById('btn-generate-route')?.addEventListener('click', generateRoute);
   }
 
   async function generateRoute() {
     const resultContainer = document.getElementById('route-result-container');
-    resultContainer.innerHTML = `<div class="content__loading"><div class="spinner"></div><p>Optimisation du trajet...</p></div>`;
+    resultContainer.innerHTML = `<div class="content__loading"><div class="spinner"></div><p>Optimisation du trajet DRIVING...</p></div>`;
 
     try {
       const data = await API.optimizeRoute(state.selectedBins);
@@ -1659,7 +1400,7 @@ document.addEventListener('DOMContentLoaded', () => {
               <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>
             </div>
             <div>
-              <div class="route-result__title">Itinéraire optimisé généré</div>
+              <div class="route-result__title">${routeResult?.isFallback ? 'Itinéraire Vol d\'oiseau Généré (Fallback)' : 'Itinéraire Google Maps Généré'}</div>
               <div class="route-result__sub">${data.nb_points} poubelles optimisées + Dépôt</div>
             </div>
           </div>
@@ -1693,7 +1434,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
           <div class="route-metrics">
             <div>
-              <div class="route-metric__label">Distance estimée</div>
+              <div class="route-metric__label">${routeResult?.isFallback ? 'Distance vol d\'oiseau' : 'Distance DRIVING'}</div>
               <div class="route-metric__value">${distanceKm} km</div>
             </div>
             <div>
@@ -1948,24 +1689,9 @@ document.addEventListener('DOMContentLoaded', () => {
           </div>
         </div>
       </div>
-
-      <div class="card animate-slide-up" style="margin-top:20px;">
-        <div class="card__header">
-          <div class="card__header-left">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
-            <h3>Évolution horaire (24h)</h3>
-          </div>
-        </div>
-        <div class="card__body">
-          <div class="chart-container">
-            <canvas id="hourly-chart"></canvas>
-          </div>
-        </div>
-      </div>
     `;
 
     setTimeout(drawCharts, 100);
-    setTimeout(() => { renderDetailedChart().catch(() => {}); }, 120);
   }
 
   function drawCharts() {
@@ -2029,69 +1755,13 @@ document.addEventListener('DOMContentLoaded', () => {
         scales: {
           x: {
             grid: { display: false },
-            ticks: { color: '#94a3b8', font: { family: 'Inter' } }
+            ticks: { color: '#64748b', font: { family: 'Inter' } }
           },
           y: {
             beginAtZero: true,
             max: 100,
-            ticks: { color: '#64748b', callback: (value) => `${value}%` },
-            grid: { color: 'rgba(30, 36, 72, 0.8)' }
-          }
-        }
-      }
-    });
-  }
-
-  async function renderDetailedChart() {
-    const canvas = document.getElementById('hourly-chart');
-    if (!canvas) return;
-
-    const res = await apiFetch('/api/stats/hourly');
-    const data = await res.json();
-    if (data.error) return;
-
-    const ctx = canvas.getContext('2d');
-    new Chart(ctx, {
-      type: 'line',
-      data: {
-        labels: data.hours || [],
-        datasets: [
-          {
-            label: 'Niveau moyen (%)',
-            data: data.levels || [],
-            borderColor: '#5b9eff',
-            backgroundColor: 'rgba(91,158,255,0.18)',
-            tension: 0.4,
-            fill: true
-          },
-          {
-            label: 'Alertes',
-            data: data.alerts || [],
-            borderColor: '#ef4444',
-            backgroundColor: 'rgba(239,68,68,0.25)',
-            type: 'bar',
-            yAxisID: 'y1',
-            barPercentage: 0.5
-          }
-        ]
-      },
-      options: {
-        responsive: true,
-        maintainAspectRatio: false,
-        plugins: { legend: { labels: { color: '#94a3b8' } } },
-        scales: {
-          x: { ticks: { color: '#64748b' }, grid: { color: 'rgba(30,36,72,0.6)' } },
-          y: {
-            beginAtZero: true,
-            max: 100,
-            ticks: { color: '#94a3b8', callback: (v) => `${v}%` },
-            grid: { color: 'rgba(30,36,72,0.6)' }
-          },
-          y1: {
-            beginAtZero: true,
-            position: 'right',
-            ticks: { color: '#f59e0b' },
-            grid: { drawOnChartArea: false }
+            ticks: { color: '#94a3b8', callback: (value) => `${value}%` },
+            grid: { color: '#e2e8f0' }
           }
         }
       }
@@ -2107,7 +1777,6 @@ document.addEventListener('DOMContentLoaded', () => {
       renderDashboardAlerts();
     } else if (state.activeTab === 'tournees') {
       renderTournees();
-      updateRouteLocationHint();
     } else if (state.activeTab === 'alertes') {
       renderFullAlertsList();
       renderAlertsHistory();
@@ -2119,9 +1788,12 @@ document.addEventListener('DOMContentLoaded', () => {
   function setupNavigation() {
     updateUserProfileUI();
 
-    const logoutBtn = document.getElementById('logout-btn');
-    if (logoutBtn && !logoutBtn.dataset.bound) {
-      logoutBtn.dataset.bound = '1';
+    if (!document.getElementById('logout-btn')) {
+      const logoutBtn = document.createElement('button');
+      logoutBtn.id = 'logout-btn';
+      logoutBtn.className = 'header__btn';
+      logoutBtn.title = 'Se déconnecter';
+      logoutBtn.innerHTML = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>';
       logoutBtn.addEventListener('click', async () => {
         try {
           await API.logout();
@@ -2130,6 +1802,7 @@ document.addEventListener('DOMContentLoaded', () => {
           window.location.href = '/login';
         }
       });
+      document.querySelector('.header__right')?.prepend(logoutBtn);
     }
 
     const links = document.querySelectorAll('.sidebar__link');
@@ -2205,12 +1878,13 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     const searchInput = document.getElementById('search-input');
-    if (searchInput) {
-      searchInput.addEventListener('input', (event) => {
-        const query = event.target.value.toLowerCase().trim();
+    searchInput.addEventListener('input', (event) => {
+      const query = event.target.value.toLowerCase().trim();
 
       if (!query) {
-        Object.values(state.markers).forEach((record) => setMarkerVisible(record, true));
+        Object.values(state.markers).forEach((record) => {
+          record.marker.setVisible(true);
+        });
         return;
       }
 
@@ -2218,18 +1892,17 @@ document.addEventListener('DOMContentLoaded', () => {
       Object.values(state.markers).forEach((record) => {
         const bin = record.bin;
         const match = bin.nom.toLowerCase().includes(query) || bin.quartier.toLowerCase().includes(query);
-        setMarkerVisible(record, match);
-        if (!firstMatch && match) firstMatch = record.marker;
+        record.marker.setVisible(match);
+        if (!firstMatch && match) {
+          firstMatch = record.marker;
+        }
       });
 
       if (firstMatch && state.map) {
-        const ll = firstMatch.getLatLng();
-        state.map.setView(ll, Math.max(state.map.getZoom(), 15));
-        firstMatch.openPopup();
+        state.map.panTo(firstMatch.getPosition());
+        state.map.setZoom(Math.max(state.map.getZoom(), 14));
       }
     });
-  }
-
   }
 
   async function init() {
@@ -2244,13 +1917,9 @@ document.addEventListener('DOMContentLoaded', () => {
       localStorage.setItem('user', JSON.stringify(me));
       updateUserProfileUI();
 
+      registerServiceWorker();
       setupPwaInstallPrompt();
-      initGeolocationTracking();
-
-      // presentation helpers
-      initTheme();
-      initFilterChips();
-      initSystemLoadPolling();
+      await initPushNotifications();
 
       state.poubelles = await API.getPoubelles();
       state.alertes = await API.getAlertes();
@@ -2262,15 +1931,11 @@ document.addEventListener('DOMContentLoaded', () => {
       updateSimulationUI();
       setupNavigation();
       await renderDashboard();
-      const demoEnabled = new URLSearchParams(window.location.search).get('demo') === '1';
-      if (demoEnabled) {
-        startDemoMode();
-      }
       if (['SUPER_ADMIN', 'ADMIN'].includes(state.currentUser?.role)) {
         startRealTimePositionSimulation();
       }
     } catch (err) {
-      console.error(err.stack || err);
+      console.error(err);
       clearSession();
       if (window.location.pathname !== '/login') {
         window.location.href = '/login';
