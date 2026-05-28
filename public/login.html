@@ -56,7 +56,9 @@
   </div>
 
   <script>
-    const API_URL = window.location.origin;
+    const API_URL = window.location.hostname === 'localhost'
+      ? 'http://localhost:3000'
+      : 'https://suivi-dechets.onrender.com';
 
     function showError(message) {
       const el = document.getElementById('errorMsg');
