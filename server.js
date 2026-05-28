@@ -30,6 +30,7 @@ const corsOrigins = [
   'http://localhost:5173',
   'https://suivi-dechets.onrender.com',
   'https://suivi-dechets.vercel.app',
+  'https://smart-drop-two.vercel.app',
   'https://web-tech20.github.io'
 ];
 
