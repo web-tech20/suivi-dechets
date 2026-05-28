@@ -214,9 +214,9 @@ document.addEventListener('DOMContentLoaded', () => {
     toast.className = `toast toast--${type}`;
 
     let icon = '';
-    if (type === 'success') icon = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#10b981" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>';
-    else if (type === 'error') icon = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#ef4444" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>';
-    else icon = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#f59e0b" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>';
+    if (type === 'success') icon = '<span class=\"material-symbols-outlined\" style=\"color: #10b981; font-size: 18px;\">check_circle</span>';
+    else if (type === 'error') icon = '<span class=\"material-symbols-outlined\" style=\"color: #ef4444; font-size: 18px;\">error</span>';
+    else icon = '<span class=\"material-symbols-outlined\" style=\"color: #f59e0b; font-size: 18px;\">warning</span>';
 
     toast.innerHTML = `
       ${icon}
@@ -1230,14 +1230,14 @@ document.addEventListener('DOMContentLoaded', () => {
     if (state.simulationActive) {
       btn.classList.add('active');
       btn.innerHTML = `
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="4" width="16" height="16"/></svg>
+        <span class="material-symbols-outlined" style="font-size:16px;">check_box_outline_blank</span>
         <span>Arrêter Simulation</span>
       `;
       indicator.classList.remove('hidden');
     } else {
       btn.classList.remove('active');
       btn.innerHTML = `
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+        <span class="material-symbols-outlined" style="font-size:16px;">play_arrow</span>
         <span>Simulateur IoT</span>
       `;
       indicator.classList.add('hidden');
@@ -1292,7 +1292,7 @@ document.addEventListener('DOMContentLoaded', () => {
         <div class="card animate-slide-up">
           <div class="card__header">
             <div class="card__header-left">
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>
+              <span class="material-symbols-outlined" style="font-size:18px;">map</span>
               <h3>Réseau Urbain Premium - Bénin</h3>
             </div>
           </div>
@@ -1305,7 +1305,7 @@ document.addEventListener('DOMContentLoaded', () => {
           <div class="card animate-slide-up">
             <div class="card__header">
               <div class="card__header-left">
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/></svg>
+                <span class="material-symbols-outlined" style="font-size:18px;">warning</span>
                 <h3>Alertes Critiques</h3>
               </div>
             </div>
@@ -1315,7 +1315,7 @@ document.addEventListener('DOMContentLoaded', () => {
           <div class="card animate-slide-up">
             <div class="card__header">
               <div class="card__header-left">
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="12 2 2 7 12 12 22 7 12 2"/><polyline points="2 17 12 22 22 17"/><polyline points="2 12 12 17 22 12"/></svg>
+                <span class="material-symbols-outlined" style="font-size:18px;">layers</span>
                 <h3>Performances du Réseau</h3>
               </div>
             </div>
@@ -1348,7 +1348,7 @@ document.addEventListener('DOMContentLoaded', () => {
         <div class="stat-card__header">
           <span class="stat-card__label">Total Poubelles</span>
           <div class="stat-card__icon">
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+            <span class="material-symbols-outlined" style="font-size:20px;">delete</span>
           </div>
         </div>
         <div class="stat-card__value">${stats.total_poubelles}</div>
@@ -1359,7 +1359,7 @@ document.addEventListener('DOMContentLoaded', () => {
         <div class="stat-card__header">
           <span class="stat-card__label">Remplissage Moyen</span>
           <div class="stat-card__icon">
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
+            <span class="material-symbols-outlined" style="font-size:20px;">bar_chart</span>
           </div>
         </div>
         <div class="stat-card__value">${stats.niveau_moyen}%</div>
@@ -1370,7 +1370,7 @@ document.addEventListener('DOMContentLoaded', () => {
         <div class="stat-card__header">
           <span class="stat-card__label">Alertes Actives</span>
           <div class="stat-card__icon">
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/></svg>
+            <span class="material-symbols-outlined" style="font-size:20px;">notifications</span>
           </div>
         </div>
         <div class="stat-card__value">${stats.alertes_actives}</div>
@@ -1381,7 +1381,7 @@ document.addEventListener('DOMContentLoaded', () => {
         <div class="stat-card__header">
           <span class="stat-card__label">Tournées Actives</span>
           <div class="stat-card__icon">
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="6" cy="19" r="3"/><path d="M9 19h8.5a3.5 3.5 0 0 0 0-7h-11a3.5 3.5 0 0 1 0-7H15"/></svg>
+            <span class="material-symbols-outlined" style="font-size:20px;">route</span>
           </div>
         </div>
         <div class="stat-card__value">${stats.tournees_actives}</div>
@@ -1399,7 +1399,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if (activeAlerts.length === 0) {
       alertsContainer.innerHTML = `
         <div style="padding: 30px; text-align: center; color: var(--text-muted);">
-          <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-bottom: 8px; opacity: 0.5;"><circle cx="12" cy="12" r="10"/><path d="M8 12h8"/></svg>
+          <span class="material-symbols-outlined" style="font-size:32px; margin-bottom: 8px; opacity: 0.5;">remove_circle_outline</span>
           <p>Aucune alerte active</p>
         </div>
       `;
@@ -1410,7 +1410,7 @@ document.addEventListener('DOMContentLoaded', () => {
       <div class="alert-item">
         <div class="alert-item__left">
           <div class="alert-item__icon alert-item__icon--critical">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/></svg>
+            <span class="material-symbols-outlined" style="font-size:18px;">warning</span>
           </div>
           <div>
             <div class="alert-item__name">${alert.poubelle_nom || 'Poubelle'}</div>
@@ -1524,7 +1524,7 @@ document.addEventListener('DOMContentLoaded', () => {
             <div class="tournee-grid" id="tournee-select-grid">
               ${binsToCollect.length === 0 ? `
                 <div style="grid-column: 1/-1; text-align: center; padding: 40px; color: var(--text-muted);">
-                  <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-bottom: 8px; opacity: 0.5;"><circle cx="12" cy="12" r="10"/><path d="M8 12h8"/></svg>
+                  <span class="material-symbols-outlined" style="font-size:32px; margin-bottom: 8px; opacity: 0.5;">remove_circle_outline</span>
                   <p>Aucune poubelle ne nécessite de collecte urgente (&ge; 70%)</p>
                 </div>
               ` : binsToCollect.map((bin) => `
@@ -1549,7 +1549,7 @@ document.addEventListener('DOMContentLoaded', () => {
         <div class="space-y-20">
           <div class="card" id="route-result-container">
             <div style="padding: 40px; text-align: center; color: var(--text-muted);">
-              <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-bottom: 12px; opacity: 0.4;"><polygon points="12 2 2 7 12 12 22 7 12 2"/><polyline points="2 17 12 22 22 17"/><polyline points="2 12 12 17 22 12"/></svg>
+              <span class="material-symbols-outlined" style="font-size:48px; margin-bottom: 12px; opacity: 0.4;">layers</span>
               <p>Sélectionnez au moins 2 points pour calculer un itinéraire optimisé.</p>
             </div>
           </div>
@@ -1656,7 +1656,7 @@ document.addEventListener('DOMContentLoaded', () => {
         <div class="route-result" data-route-id="${data.id}">
           <div class="route-result__header">
             <div class="route-result__icon">
-              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>
+              <span class="material-symbols-outlined" style="font-size:24px;">check</span>
             </div>
             <div>
               <div class="route-result__title">Itinéraire optimisé généré</div>
@@ -1773,7 +1773,7 @@ document.addEventListener('DOMContentLoaded', () => {
       showToast('Erreur lors du calcul de tournée', 'error');
       resultContainer.innerHTML = `
         <div style="padding: 40px; text-align: center; color: var(--red);">
-          <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-bottom: 12px; opacity: 0.8;"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+          <span class="material-symbols-outlined" style="font-size:48px; margin-bottom: 12px; opacity: 0.8;">error_outline</span>
           <p>Échec du calcul : ${err.message || 'Erreur inconnue'}</p>
         </div>
       `;
@@ -1802,7 +1802,7 @@ document.addEventListener('DOMContentLoaded', () => {
         <div class="card animate-slide-up">
           <div class="card__header">
             <div class="card__header-left">
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 8v4l3 3"/></svg>
+              <span class="material-symbols-outlined" style="font-size:18px;">schedule</span>
               <h3>Historique Récent</h3>
             </div>
           </div>
@@ -1824,7 +1824,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if (active.length === 0) {
       list.innerHTML = `
         <div style="padding: 40px; text-align: center; color: var(--text-muted);">
-          <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-bottom: 8px; opacity: 0.5;"><polyline points="20 6 9 17 4 12"/></svg>
+          <span class="material-symbols-outlined" style="font-size:40px; margin-bottom: 8px; opacity: 0.5;">check_circle</span>
           <p>Aucune alerte en attente. Tout est sous contrôle.</p>
         </div>
       `;
@@ -1835,7 +1835,7 @@ document.addEventListener('DOMContentLoaded', () => {
       <div class="alert-item">
         <div class="alert-item__left">
           <div class="alert-item__icon ${alert.severite === 'critical' ? 'alert-item__icon--critical' : 'alert-item__icon--warning'}">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/></svg>
+            <span class="material-symbols-outlined" style="font-size:18px;">warning</span>
           </div>
           <div>
             <div class="alert-item__name">${alert.poubelle_nom} (${alert.quartier})</div>
@@ -1927,7 +1927,7 @@ document.addEventListener('DOMContentLoaded', () => {
         <div class="card">
           <div class="card__header">
             <div class="card__header-left">
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
+              <span class="material-symbols-outlined" style="font-size:18px;">attach_money</span>
               <h3>Performances Écologiques</h3>
             </div>
           </div>
@@ -1952,7 +1952,7 @@ document.addEventListener('DOMContentLoaded', () => {
       <div class="card animate-slide-up" style="margin-top:20px;">
         <div class="card__header">
           <div class="card__header-left">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+            <span class="material-symbols-outlined" style="font-size:18px;">monitoring</span>
             <h3>Évolution horaire (24h)</h3>
           </div>
         </div>
