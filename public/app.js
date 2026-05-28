@@ -1514,7 +1514,7 @@ document.addEventListener('DOMContentLoaded', () => {
         <div class="card">
           <div class="card__header">
             <div class="card__header-left">
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="6" cy="19" r="3"/><path d="M9 19h8.5a3.5 3.5 0 0 0 0-7h-11a3.5 3.5 0 0 1 0-7H15"/></svg>
+              <span class="material-symbols-outlined" style="font-size:18px;">route</span>
               <h3>Sélectionner les points de collecte (Remplissage &ge; 70%)</h3>
             </div>
             <button class="btn btn--primary btn--sm" id="btn-select-all">Sélectionner tout</button>
@@ -1792,7 +1792,7 @@ document.addEventListener('DOMContentLoaded', () => {
         <div class="card animate-slide-up">
           <div class="card__header">
             <div class="card__header-left">
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/></svg>
+              <span class="material-symbols-outlined" style="font-size:18px;">notifications</span>
               <h3>Alertes Actives</h3>
             </div>
           </div>
@@ -1913,7 +1913,7 @@ document.addEventListener('DOMContentLoaded', () => {
         <div class="card">
           <div class="card__header">
             <div class="card__header-left">
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
+              <span class="material-symbols-outlined" style="font-size:18px;">bar_chart</span>
               <h3>Top Quartiers Producteurs de Déchets</h3>
             </div>
           </div>
