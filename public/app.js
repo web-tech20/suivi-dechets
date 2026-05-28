@@ -253,15 +253,15 @@ document.addEventListener('DOMContentLoaded', () => {
     const permission = await Notification.requestPermission();
     if (permission === 'granted') {
       await navigator.serviceWorker.ready;
-      console.log('✅ Notifications push autorisées');
+      console.log('[OK] Notifications push autorisées');
     }
   }
 
   function registerServiceWorker() {
     if ('serviceWorker' in navigator) {
       navigator.serviceWorker.register('/service-worker.js')
-        .then((registration) => console.log('✅ Service Worker enregistré', registration.scope))
-        .catch((error) => console.error('❌ Service Worker échec', error));
+        .then((registration) => console.log('[OK] Service Worker enregistré', registration.scope))
+        .catch((error) => console.error('[ERR] Service Worker échec', error));
     }
   }
 
@@ -294,11 +294,11 @@ document.addEventListener('DOMContentLoaded', () => {
     const badge = document.getElementById('location-status-badge');
     if (!badge) return;
     if (state.currentLocation) {
-      badge.textContent = '📍';
+      badge.innerHTML = '<span class=\"material-symbols-outlined\" style=\"font-size:16px; vertical-align:middle;\">location_on</span>';
       badge.classList.remove('hidden');
       badge.title = 'Géolocalisation active';
     } else if (state.locationPermission === 'denied') {
-      badge.textContent = '❌';
+      badge.innerHTML = '<span class=\"material-symbols-outlined\" style=\"font-size:16px; vertical-align:middle; color:var(--red);\">location_off</span>';
       badge.classList.remove('hidden');
       badge.title = 'Géolocalisation refusée';
     } else {
@@ -488,7 +488,7 @@ document.addEventListener('DOMContentLoaded', () => {
     return L.divIcon({
       html: `
         <div class="uac-marker-pin" style="--uac-color:${color}">
-          <div class="uac-marker-inner">🎓</div>
+          <div class="uac-marker-inner"><span class="material-symbols-outlined" style="font-size:18px;">school</span></div>
         </div>
       `,
       className: 'uac-marker',
@@ -524,7 +524,7 @@ document.addEventListener('DOMContentLoaded', () => {
     hackathonMapLayers = [];
 
     const bannerIcon = L.divIcon({
-      html: `<div class="hackathon-banner">🚀 HACKATHON FAST 2026</div>`,
+      html: `<div class="hackathon-banner"><span class="material-symbols-outlined" style="vertical-align:middle; font-size:18px;">rocket_launch</span> HACKATHON FAST 2026</div>`,
       className: 'hackathon-banner-wrap',
       iconSize: [220, 44],
       iconAnchor: [110, 22]
@@ -725,25 +725,25 @@ document.addEventListener('DOMContentLoaded', () => {
     container.innerHTML = `
       <div class="stats-showcase">
         <div class="stat-premium">
-          <div class="stat-premium__icon">🏫</div>
+          <div class="stat-premium__icon"><span class="material-symbols-outlined">school</span></div>
           <div class="stat-premium__value">${total}</div>
           <div class="stat-premium__label">Poubelles connectées</div>
           <div class="stat-premium__sub">Abomey-Calavi & Cotonou · ${uac} sur campus UAC</div>
         </div>
         <div class="stat-premium">
-          <div class="stat-premium__icon">📡</div>
+          <div class="stat-premium__icon"><span class="material-symbols-outlined">satellite_alt</span></div>
           <div class="stat-premium__value">${esp32}</div>
           <div class="stat-premium__label">ESP32 actifs</div>
           <div class="stat-premium__sub">données en temps réel</div>
         </div>
         <div class="stat-premium">
-          <div class="stat-premium__icon">🚛</div>
+          <div class="stat-premium__icon"><span class="material-symbols-outlined">local_shipping</span></div>
           <div class="stat-premium__value">${co2}</div>
           <div class="stat-premium__label">kg CO₂ économisés</div>
           <div class="stat-premium__sub">optimisation TSP des tournées</div>
         </div>
         <div class="stat-premium">
-          <div class="stat-premium__icon">⚡</div>
+          <div class="stat-premium__icon"><span class="material-symbols-outlined">bolt</span></div>
           <div class="stat-premium__value">&lt; 100ms</div>
           <div class="stat-premium__label">Temps de réponse API</div>
           <div class="stat-premium__sub">temps réel WebSocket</div>
@@ -770,7 +770,7 @@ document.addEventListener('DOMContentLoaded', () => {
     state.map.flyTo([FAST_UAC.lat, FAST_UAC.lng], 17, { duration: 1.5 });
     const pulse = L.marker([FAST_UAC.lat, FAST_UAC.lng], {
       icon: L.divIcon({
-        html: '<div class="demo-flash-marker">🎓 FAST UAC</div>',
+        html: '<div class="demo-flash-marker"><span class="material-symbols-outlined" style="vertical-align:middle; font-size:14px;">school</span> FAST UAC</div>',
         className: 'demo-flash-wrap',
         iconSize: [120, 40],
         iconAnchor: [60, 40]
@@ -806,7 +806,7 @@ document.addEventListener('DOMContentLoaded', () => {
         console.warn('Demo ESP32 simulate failed', esp32Id, e);
       }
     }
-    showToast('📡 Simulation ESP32 — envoi de relevés en direct', 'info');
+    showToast('<span class=\"material-symbols-outlined\" style=\"vertical-align:middle; font-size:16px;\">satellite_alt</span>  Simulation ESP32 — envoi de relevés en direct', 'info');
   }
 
   function startDemoMode() {
@@ -819,7 +819,7 @@ document.addEventListener('DOMContentLoaded', () => {
       overlay.className = 'demo-mode';
       overlay.innerHTML = `
         <div class="demo-badge">
-          🎓 DÉMONSTRATION — FAST UAC HACKATHON 2026
+          <span class=\"material-symbols-outlined\" style=\"vertical-align:middle; font-size:24px; margin-bottom:10px;\">school</span><br>DÉMONSTRATION — FAST UAC HACKATHON 2026
         </div>
       `;
       document.body.appendChild(overlay);
@@ -827,13 +827,13 @@ document.addEventListener('DOMContentLoaded', () => {
 
     const steps = [
       { delay: 0, action: () => showToast('Bienvenue à la démo SUIVI-DÉCHETS', 'info') },
-      { delay: 2000, action: () => showToast('📊 Réseau connecté — Abomey-Calavi & Cotonou', 'success') },
+      { delay: 2000, action: () => showToast('<span class=\"material-symbols-outlined\" style=\"vertical-align:middle; font-size:16px;\">bar_chart</span>  Réseau connecté — Abomey-Calavi & Cotonou', 'success') },
       { delay: 5000, action: () => highlightMapDemo() },
       { delay: 8000, action: () => showToast('🗺️ Clustering intelligent — visualisation fluide du réseau', 'info') },
       { delay: 12000, action: () => simulateESP32Bulk() },
-      { delay: 15000, action: () => showToast('📡 ESP32 — relevés toutes les 60 secondes', 'success') },
+      { delay: 15000, action: () => showToast('<span class=\"material-symbols-outlined\" style=\"vertical-align:middle; font-size:16px;\">satellite_alt</span>  ESP32 — relevés toutes les 60 secondes', 'success') },
       { delay: 20000, action: () => highlightUACDemo() },
-      { delay: 25000, action: () => showToast('🎓 Solution développée à la FAST UAC', 'success') }
+      { delay: 25000, action: () => showToast('<span class=\"material-symbols-outlined\" style=\"vertical-align:middle; font-size:16px;\">school</span>  Solution développée à la FAST UAC', 'success') }
     ];
 
     steps.forEach((step) => {
@@ -1141,7 +1141,7 @@ document.addEventListener('DOMContentLoaded', () => {
   function startRealTimePositionSimulation() {
     stopRealTimePositionSimulation();
     scheduleNextPositionTick();
-    console.log('📍 Simulation repositionnement activée (45–60 s)');
+    console.log('[LOC] Simulation repositionnement activée (45–60 s)');
   }
 
   function stopRealTimePositionSimulation() {
@@ -1154,7 +1154,7 @@ document.addEventListener('DOMContentLoaded', () => {
   socket = io(API_URL, { transports: ['websocket', 'polling'] });
 
   socket.on('connect', () => {
-    console.log('📡 Connecté au serveur temps réel');
+    console.log('[NET] Connecté au serveur temps réel');
   });
 
   socket.on('bin:position:update', (updatedBin) => {
