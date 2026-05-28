@@ -31,8 +31,5 @@
     "waste-management"
   ],
   "author": "FAST UAC",
-  "license": "MIT",
-  "devDependencies": {
-    "vercel": "^54.5.0"
-  }
+  "license": "MIT"
 }
