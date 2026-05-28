@@ -2,24 +2,18 @@
 // SUIVI-DÉCHETS — Frontend App (Vanilla JS SPA)
 // ═══════════════════════════════════════════════════════════════
 // Détection auto environnement (localhost ou Render)
-const API_URL = window.location.hostname === 'localhost' 
-  ? 'http://localhost:3000' 
+const API_URL = window.location.hostname === 'localhost'
+  ? 'http://localhost:3000'
   : 'https://suivi-dechets.onrender.com';
 
-// Exemple pour WebSocket
-const socket = io(API_URL);
-const API_URL = 'https://suivi-dechets.onrender.com';
+// Socket will be initialized once below (after DOM ready)
+let socket = null;
 const bootToken = localStorage.getItem('accessToken');
 if (!bootToken && window.location.pathname !== '/login') {
   window.location.href = '/login';
 }
 
 document.addEventListener('DOMContentLoaded', () => {
-  // API endpoint — use Render backend in production, localhost in dev
-  const API_URL = window.location.hostname === 'localhost' 
-    ? 'http://localhost:3000' 
-    : 'https://suivi-dechets.onrender.com';
-
   const MAP_CENTER = [6.4486, 2.3553];
   const MAP_MAX_BOUNDS = [[6.43, 2.33], [6.47, 2.38]];
   const LAND_BOUNDS = { latMin: 6.435, latMax: 6.465, lngMin: 2.335, lngMax: 2.375 };
@@ -1157,7 +1151,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   }
 
-  const socket = io(API_URL, { transports: ['websocket', 'polling'] });
+  socket = io(API_URL, { transports: ['websocket', 'polling'] });
 
   socket.on('connect', () => {
     console.log('📡 Connecté au serveur temps réel');
