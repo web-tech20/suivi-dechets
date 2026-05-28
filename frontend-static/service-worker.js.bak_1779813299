@@ -1,0 +1,95 @@
+const CACHE_NAME = 'suivi-dechets-v4';
+const urlsToCache = [
+  '/',
+  '/login',
+  '/styles.css',
+  '/app.js',
+  '/favicon.svg',
+  '/manifest.json'
+];
+
+self.addEventListener('install', (event) => {
+  event.waitUntil(
+    caches.open(CACHE_NAME)
+      .then((cache) => cache.addAll(urlsToCache))
+      .then(() => self.skipWaiting())
+  );
+});
+
+self.addEventListener('activate', (event) => {
+  event.waitUntil(
+    caches.keys().then((cacheNames) => Promise.all(
+      cacheNames.map((cacheName) => {
+        if (cacheName !== CACHE_NAME) {
+          return caches.delete(cacheName);
+        }
+        return null;
+      })
+    )).then(() => self.clients.claim())
+  );
+});
+
+function isCacheableRequest(request) {
+  if (request.method !== 'GET') return false;
+  const url = new URL(request.url);
+  if (url.protocol !== 'http:' && url.protocol !== 'https:') return false;
+  if (url.origin !== self.location.origin) return false;
+  return true;
+}
+
+self.addEventListener('fetch', (event) => {
+  const url = new URL(event.request.url);
+
+  if (url.pathname.startsWith('/api/') || url.pathname.startsWith('/socket.io/')) {
+    event.respondWith(
+      fetch(event.request).catch(() => new Response(
+        JSON.stringify({ error: 'Hors ligne, impossible de contacter le serveur' }),
+        { status: 503, headers: { 'Content-Type': 'application/json' } }
+      ))
+    );
+    return;
+  }
+
+  if (!isCacheableRequest(event.request)) {
+    event.respondWith(fetch(event.request));
+    return;
+  }
+
+  event.respondWith(
+    fetch(event.request)
+      .then((response) => {
+        if (response.ok) {
+          const clone = response.clone();
+          caches.open(CACHE_NAME).then((cache) => cache.put(event.request, clone));
+        }
+        return response;
+      })
+      .catch(() => caches.match(event.request))
+  );
+});
+
+self.addEventListener('push', (event) => {
+  const data = event.data ? event.data.json() : {};
+  const options = {
+    body: data.body || 'Nouvelle alerte sur le réseau',
+    icon: '/favicon.svg',
+    badge: '/favicon.svg',
+    vibrate: [200, 100, 200],
+    data: { url: data.url || '/' },
+    actions: [
+      { action: 'open', title: 'Voir' },
+      { action: 'close', title: 'Fermer' }
+    ]
+  };
+
+  event.waitUntil(
+    self.registration.showNotification(data.title || 'SUIVI-DÉCHETS', options)
+  );
+});
+
+self.addEventListener('notificationclick', (event) => {
+  event.notification.close();
+  if (event.action === 'open') {
+    event.waitUntil(clients.openWindow(event.notification.data ? event.notification.data.url : '/'));
+  }
+});

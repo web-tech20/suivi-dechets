@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SUIVI-DÉCHETS | Admin Dashboard</title>
+  <link rel="stylesheet" href="/styles.css">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+</head>
+<body>
+  <main class="content" style="max-width:1200px;margin:0 auto;">
+    <div class="page-title">
+      <h1>Dashboard Admin Industriel</h1>
+      <p>Vue globale pour centaines/milliers de poubelles et ESP32</p>
+    </div>
+    <div id="stats-container" class="content__loading">
+      <div class="spinner"></div>
+      <p>Chargement des statistiques admin...</p>
+    </div>
+  </main>
+
+  <script>
+    async function apiFetch(url) {
+      const token = localStorage.getItem('accessToken');
+      const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+      if (res.status === 401) {
+        window.location.href = '/login';
+        return null;
+      }
+      return res.json();
+    }
+
+    function formatDate(value) {
+      if (!value) return '--';
+      const d = new Date(value);
+      return Number.isNaN(d.getTime()) ? value : d.toLocaleString('fr-FR');
+    }
+
+    async function loadPage(page = 1) {
+      const [stats, bins] = await Promise.all([
+        apiFetch('/api/admin/stats'),
+        apiFetch(`/api/admin/poubelles?page=${page}&limit=50`)
+      ]);
+      if (!stats || !bins) return;
+
+      const cards = `
+        <div class="stats-grid" style="margin-bottom:20px;">
+          <div class="stat-card stat-card--blue"><div class="stat-card__value">${stats.total_bins}</div><div class="stat-card__sub">Total poubelles</div></div>
+          <div class="stat-card stat-card--emerald"><div class="stat-card__value">${stats.active_bins}</div><div class="stat-card__sub">Actives</div></div>
+          <div class="stat-card stat-card--red"><div class="stat-card__value">${stats.active_alerts}</div><div class="stat-card__sub">Alertes actives</div></div>
+          <div class="stat-card stat-card--purple"><div class="stat-card__value">${stats.esp32_online}</div><div class="stat-card__sub">ESP32 connectés</div></div>
+        </div>
+      `;
+
+      const rows = (bins.data || []).map((b) => `
+        <tr>
+          <td>${b.id}</td>
+          <td>${b.nom || '-'}</td>
+          <td>${b.quartier || '-'}</td>
+          <td>${Math.round(Number(b.niveau || 0))}%</td>
+          <td>${b.batterie ?? '--'}%</td>
+          <td>${formatDate(b.dernier_releve)}</td>
+        </tr>
+      `).join('');
+
+      const pages = Array.from({ length: bins.pagination.pages }, (_, i) => i + 1)
+        .slice(Math.max(0, page - 3), page + 2)
+        .map((p) => `<button class="btn btn--dark btn--sm" data-page="${p}">${p}</button>`)
+        .join('');
+
+      document.getElementById('stats-container').className = '';
+      document.getElementById('stats-container').innerHTML = `
+        ${cards}
+        <div class="card" style="margin-bottom:20px;">
+          <div class="card__header"><div class="card__header-left"><h3>Niveau moyen et alertes</h3></div></div>
+          <div class="card__body" style="height:280px;"><canvas id="admin-chart"></canvas></div>
+        </div>
+        <div class="card">
+          <div class="card__header"><div class="card__header-left"><h3>Poubelles (page ${bins.pagination.page}/${bins.pagination.pages})</h3></div></div>
+          <div class="card__body" style="overflow:auto;">
+            <table style="width:100%;border-collapse:collapse;">
+              <thead><tr style="text-align:left;color:#94a3b8;"><th>ID</th><th>Nom</th><th>Quartier</th><th>Niveau</th><th>Batterie</th><th>Dernier relevé</th></tr></thead>
+              <tbody>${rows}</tbody>
+            </table>
+            <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:16px;">${pages}</div>
+          </div>
+        </div>
+      `;
+
+      const hourly = await apiFetch('/api/stats/hourly');
+      const ctx = document.getElementById('admin-chart');
+      if (ctx && hourly) {
+        new Chart(ctx, {
+          type: 'line',
+          data: {
+            labels: hourly.hours,
+            datasets: [
+              { label: 'Niveau moyen', data: hourly.levels, borderColor: '#5b9eff', backgroundColor: 'rgba(91,158,255,0.2)', fill: true, tension: 0.35 },
+              { label: 'Alertes', data: hourly.alerts, borderColor: '#ef4444', type: 'bar', yAxisID: 'y1' }
+            ]
+          },
+          options: { responsive: true, maintainAspectRatio: false }
+        });
+      }
+
+      document.querySelectorAll('[data-page]').forEach((btn) => {
+        btn.addEventListener('click', () => loadPage(Number(btn.dataset.page)));
+      });
+    }
+
+    loadPage();
+  </script>
+</body>
+</html>

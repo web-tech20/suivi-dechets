@@ -1,0 +1,35 @@
+{
+  "name": "SUIVI-DÉCHETS",
+  "short_name": "SuiviDéchets",
+  "description": "Plateforme de gestion intelligente des déchets urbains",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "theme_color": "#10b981",
+  "background_color": "#0f172a",
+  "orientation": "portrait",
+  "icons": [
+    {
+      "src": "/favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "Tableau de bord",
+      "short_name": "Dashboard",
+      "url": "/",
+      "icons": [{ "src": "/favicon.svg", "sizes": "any" }]
+    },
+    {
+      "name": "Carte des poubelles",
+      "short_name": "Carte",
+      "url": "/?tab=carte",
+      "icons": [{ "src": "/favicon.svg", "sizes": "any" }]
+    }
+  ],
+  "categories": ["productivity", "utilities", "business"],
+  "lang": "fr-FR"
+}
