@@ -29,7 +29,8 @@ const corsOrigins = [
   'http://localhost:3000',
   'http://localhost:5173',
   'https://suivi-dechets.onrender.com',
-  'https://suivi-dechets.vercel.app'
+  'https://suivi-dechets.vercel.app',
+  'https://web-tech20.github.io'
 ];
 
 const io = new Server(server, { 
